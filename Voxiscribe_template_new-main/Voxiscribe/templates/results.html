@@ -1,0 +1,88 @@
+{% extends "layout.html" %}
+{% block content %}
+<div class="card">
+  <h2>Results: {{ exam.title }}</h2>
+
+  {% if role == 'student' %}
+    {% if attempt %}
+      <p>Status: {{ attempt.status }} | Total Score: {{ attempt.total_score }}</p>
+    {% endif %}
+    <table class="table">
+      <tr><th>#</th><th>Question</th><th>Your Answer</th><th>Correct</th><th>Score</th></tr>
+      {% for qa in qas %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td>{{ qa.question_text }}</td>
+          <td>
+            {% if qa.question_type == 'MCQ' %}
+              {{ qa.selected_option or '-' }}
+            {% else %}
+              {{ qa.answer_text or '-' }}
+            {% endif %}
+          </td>
+          <td>
+            {% if qa.question_type == 'MCQ' %}
+              {{ qa.is_correct }}
+            {% else %}
+              N/A
+            {% endif %}
+          </td>
+          <td>{{ qa.score or 0 }}</td>
+        </tr>
+      {% endfor %}
+    </table>
+    <a class="btn" href="{{ url_for('student_dashboard') }}">Back to Dashboard</a>
+  {% else %}
+    <h3>Submitted Students</h3>
+    <table class="table">
+      <tr><th>Student</th><th>Total Score</th><th>Actions</th></tr>
+      {% for s in students %}
+        <tr>
+          <td>{{ s.username }}</td>
+          <td>{{ s.total_score }}</td>
+          <td><a class="btn" href="#" data-username="{{ s.username }}" data-student-id="{{ s.student_id }}" onclick="openGradeModal({{ s.student_id }})">Grade</a></td>
+        </tr>
+      {% endfor %}
+    </table>
+
+    <div id="grade-modal" class="modal" style="display:none;">
+      <div class="modal-content">
+        <span class="modal-close" onclick="closeGradeModal()">&times;</span>
+        <h3>Manual Grading</h3>
+        <div id="grade-body">Loading...</div>
+        <button class="btn" onclick="submitGrades()">Update Marks</button>
+      </div>
+    </div>
+
+    <script>
+    let gradeExamId = {{ exam.id }};
+    let gradeStudentId = null;
+    function openGradeModal(studentId){
+      gradeStudentId = studentId;
+      const modal = document.getElementById('grade-modal');
+      const body = document.getElementById('grade-body');
+      modal.style.display = 'block';
+      body.innerHTML = 'Loading...';
+      fetch(`/results/${gradeExamId}?student_id=${studentId}&view=detail`).then(r=>r.text()).then(html=>{
+        // For brevity, load descriptive questions via API-like pattern could be added.
+        // Here we just prompt teacher to enter scores by question id.
+        body.innerHTML = `
+          <p>Enter scores as JSON array of {question_id, score}</p>
+          <textarea id="grades-json" style="width:100%;min-height:150px;">[]</textarea>
+        `;
+      }).catch(()=>{ body.textContent='Failed to load'; });
+    }
+    function closeGradeModal(){ document.getElementById('grade-modal').style.display='none'; }
+    async function submitGrades(){
+      try{
+        const grades = JSON.parse(document.getElementById('grades-json').value || '[]');
+        const res = await fetch(`/grade/${gradeExamId}`, { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({grades: grades.map(g=>Object.assign(g,{student_id: gradeStudentId}))}) });
+        const data = await res.json();
+        if (data.success){ alert('Marks updated'); closeGradeModal(); location.reload(); }
+        else alert('Failed: '+(data.message||'error'));
+      }catch(e){ alert('Invalid JSON or network error'); }
+    }
+    </script>
+  {% endif %}
+</div>
+{% endblock %}
