@@ -1,0 +1,181 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="card">
+    <div class="dashboard-header">
+        <h2>Create New Exam</h2>
+        <a href="{{ url_for('teacher_dashboard') }}" class="btn btn-secondary">Back to Dashboard</a>
+    </div>
+    <form id="exam-form" onsubmit="return false;">
+        <div class="form-group">
+            <label for="title">Exam Title</label>
+            <input type="text" id="title" name="title" required>
+        </div>
+        <div class="form-group">
+            <label for="description">Description</label>
+            <textarea id="description" name="description" class="form-control" placeholder="Short description..."></textarea>
+        </div>
+        <div class="form-group">
+            <label for="duration">Exam Duration (in minutes)</label>
+            <input type="number" id="duration" name="duration" min="1" required>
+        </div>
+        <hr>
+        <h3>Questions</h3>
+        <div id="questions-container"></div>
+        <button type="button" id="add-question" class="btn btn-secondary">Add Question</button>
+        <hr>
+        <button id="save-exam" type="button" class="btn">Save Exam</button>
+    </form>
+</div>
+
+<script>
+(function(){
+    let qIndex = 0;
+    const container = document.getElementById('questions-container');
+
+    function addQuestion(){
+        qIndex++;
+        const el = document.createElement('div');
+        el.className = 'question-block';
+        el.dataset.index = qIndex;
+        el.innerHTML = `
+            <div class="q-header">
+              <h4>Question ${qIndex}</h4>
+              <button type="button" class="btn btn-danger btn-sm remove-question">Remove</button>
+            </div>
+            <div class="form-group">
+                <label>Question Text</label>
+                <textarea class="form-control q-text" required></textarea>
+            </div>
+            <div class="form-group">
+                <label>Question Type</label>
+                <select class="form-control q-type">
+                    <option value="MCQ">MCQ</option>
+                    <option value="Descriptive">Descriptive</option>
+                </select>
+            </div>
+            <div class="mcq-area">
+                <div class="form-group grid-2">
+                  <div>
+                    <label>Option A</label>
+                    <input type="text" class="form-control opt" data-key="A">
+                  </div>
+                  <div>
+                    <label>Option B</label>
+                    <input type="text" class="form-control opt" data-key="B">
+                  </div>
+                </div>
+                <div class="form-group grid-2">
+                  <div>
+                    <label>Option C</label>
+                    <input type="text" class="form-control opt" data-key="C">
+                  </div>
+                  <div>
+                    <label>Option D</label>
+                    <input type="text" class="form-control opt" data-key="D">
+                  </div>
+                </div>
+                <div class="form-group">
+                    <label>Correct Answer</label>
+                    <select class="form-control correct">
+                      <option value="">-- select --</option>
+                      <option value="A">A</option>
+                      <option value="B">B</option>
+                      <option value="C">C</option>
+                      <option value="D">D</option>
+                    </select>
+                </div>
+            </div>
+        `;
+        container.appendChild(el);
+        updateMcqVisibility(el);
+    }
+
+    function updateMcqVisibility(block){
+        const type = block.querySelector('.q-type').value;
+        block.querySelector('.mcq-area').style.display = (type === 'MCQ') ? 'block' : 'none';
+    }
+
+    document.getElementById('add-question').addEventListener('click', addQuestion);
+
+    container.addEventListener('change', function(e){
+        if (e.target.classList.contains('q-type')) {
+            updateMcqVisibility(e.target.closest('.question-block'));
+        }
+    });
+
+    container.addEventListener('click', function(e){
+        if (e.target.classList.contains('remove-question')) {
+            e.target.closest('.question-block').remove();
+        }
+    });
+
+    document.getElementById('save-exam').addEventListener('click', async function(){
+        const title = document.getElementById('title').value.trim();
+        const description = document.getElementById('description').value.trim();
+        const duration = parseInt(document.getElementById('duration').value, 10);
+        const blocks = Array.from(container.querySelectorAll('.question-block'));
+        if (!title || !duration || blocks.length === 0) { return showToast('Please fill all fields and add at least one question', true); }
+
+        const questions = blocks.map(b=>{
+            const type = b.querySelector('.q-type').value;
+            const text = b.querySelector('.q-text').value.trim();
+            if (type === 'MCQ'){
+                const opts = {};
+                b.querySelectorAll('.opt').forEach(inp=>{ if (inp.value.trim()) opts[inp.dataset.key]=inp.value.trim(); });
+                const correct = b.querySelector('.correct').value || null;
+                return { type, text, options: opts, correct };
+            }
+            return { type, text };
+        });
+
+        try {
+            const res = await fetch('/save_exam', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, description, duration, questions })
+            });
+            const data = await res.json();
+            if (data.success){
+                showToast('Exam saved successfully!');
+                window.location.href = '{{ url_for('teacher_dashboard') }}';
+            } else {
+                showToast(data.message || 'Save failed', true);
+            }
+        } catch(err){
+            showToast('Network error while saving', true);
+        }
+    });
+
+    function showToast(msg, isError){
+        const t = document.createElement('div');
+        t.className = 'toast' + (isError?' toast-error':'');
+        t.textContent = msg;
+        document.body.appendChild(t);
+        setTimeout(()=>{ t.classList.add('show'); }, 10);
+        setTimeout(()=>{ t.classList.remove('show'); t.remove(); }, 3000);
+    }
+
+    // Start with one question block by default
+    addQuestion();
+})();
+</script>
+<style>
+.question-block { 
+    border: 1px solid #eee;
+    padding: 16px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+}
+.q-header { display: flex; align-items: center; justify-content: space-between; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+textarea.form-control { width: 100%; min-height: 80px; }
+.btn-sm { padding: 6px 10px; font-size: 12px; }
+.toast { position: fixed; right: 16px; bottom: -50px; background: #333; color: #fff; padding: 10px 14px; border-radius: 6px; opacity: 0; transition: all .3s; }
+.toast.show { bottom: 16px; opacity: 1; }
+.toast-error { background: #c0392b; }
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; }
+.modal .modal-content { background: #fff; padding: 20px; border-radius: 8px; width: 90%; max-width: 700px; }
+.modal-close { float: right; cursor: pointer; }
+</style>
+{% endblock %}

@@ -1,0 +1,20 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="card" style="max-width: 500px; margin: auto;">
+    <h1 class="text-center">Face and Voice Authentication</h1>
+    <div class="form-group">
+        <video id="video" width="100%" autoplay></video>
+        <button id="capture-face" class="btn">Capture Face</button>
+    </div>
+    <div class="form-group">
+        <p>Please say the following phrase: "My voice is my password."</p>
+        <button id="record-voice" class="btn">Record Voice</button>
+        <button id="stop-recording" class="btn" disabled>Stop Recording</button>
+    </div>
+    <div class="form-group">
+        <button id="submit-auth" class="btn" style="width: 100%;" disabled>Submit</button>
+    </div>
+</div>
+<script src="{{ url_for('static', filename='js/face_voice_auth.js') }}"></script>
+{% endblock %}

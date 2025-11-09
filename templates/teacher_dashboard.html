@@ -1,0 +1,73 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="dashboard-header">
+    <h1>Welcome, {{ session.username }}!</h1>
+    <a href="{{ url_for('logout') }}" class="btn btn-danger">Logout</a>
+</div>
+
+<div class="card">
+    <h2>Teacher Dashboard</h2>
+    <a href="{{ url_for('create_exam') }}" class="btn btn-primary">Create New Exam</a>
+    <hr class="mt-3">
+    <h3>Your Exams</h3>
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Title</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for exam in exams %}
+                <tr data-exam-id="{{ exam[0] }}">
+                    <td>{{ exam[1] }}</td>
+                    <td class="status">
+                        {% if exam[4] %}
+                            <span style="color: green;">Published</span>
+                        {% else %}
+                            Draft
+                        {% endif %}
+                    </td>
+                    <td class="actions">
+                        {% if not exam[4] %}
+                            <button class="btn btn-secondary publish-btn">Publish</button>
+                        {% endif %}
+                        <a href="#" class="btn btn-secondary">Edit</a>
+                        <a href="#" class="btn btn-danger">Delete</a>
+                    </td>
+                </tr>
+            {% else %}
+                <tr>
+                    <td colspan="3">You have not created any exams yet.</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const publishButtons = document.querySelectorAll('.publish-btn');
+        publishButtons.forEach(button => {
+            button.addEventListener('click', function() {
+                const examId = this.closest('tr').dataset.examId;
+                fetch(`/teacher/exams/${examId}/publish`, {
+                    method: 'POST',
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const statusCell = this.closest('tr').querySelector('.status');
+                        statusCell.innerHTML = '<span style="color: green;">Published</span>';
+                        this.remove();
+                    } else {
+                        alert('Failed to publish exam.');
+                    }
+                });
+            });
+        });
+    });
+</script>
+{% endblock %}

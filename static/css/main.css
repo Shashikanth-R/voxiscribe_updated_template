@@ -1,0 +1,27 @@
+/* Basic styles for Voxiscribe */
+:root { color-scheme: light dark; }
+body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; }
+header { padding: 1rem; border-bottom: 1px solid #ddd; }
+main { padding: 1rem; }
+
+.login-logo {
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    object-fit: cover;
+    margin: 0 auto 20px;
+    display: block;
+}
+
+input, select, textarea {
+    background-color: #fff;
+    color: #000;
+}
+
+.login-page {
+    background-image: url('/static/images/bg1.png');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+}
