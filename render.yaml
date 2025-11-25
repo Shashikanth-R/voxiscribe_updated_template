@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: voxiscribe
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.9.16
+      - key: DATABASE_URL
+        fromDatabase:
+          name: voxiscribe-db
+          property: connectionString
+  - type: pserv
+    name: voxiscribe-db
+    env: postgresql
+    plan: free
+    databaseName: voxiscribe
+    user: voxiscribe_user

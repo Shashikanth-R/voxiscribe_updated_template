@@ -1,5 +1,4 @@
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, Response
-from flask_mysqldb import MySQL
 import json
 import csv
 from io import StringIO
@@ -8,21 +7,46 @@ import os
 import tempfile
 import config
 from speech_server import transcribe_audio
-
+import psycopg2
+from psycopg2.extras import RealDictCursor
 import random
 
 app = Flask(__name__)
+app.secret_key = config.SECRET_KEY
 
-# Configure db
-app.config['MYSQL_HOST'] = config.DB_HOST
-app.config['MYSQL_USER'] = config.DB_USER
-app.config['MYSQL_PASSWORD'] = config.DB_PASSWORD
-app.config['MYSQL_DB'] = config.DB_NAME
-app.config['MYSQL_CURSORCLASS'] = 'DictCursor'
+# Database connection
+def get_db_connection():
+    if hasattr(config, 'DATABASE_URL') and config.DATABASE_URL:
+        return psycopg2.connect(config.DATABASE_URL, cursor_factory=RealDictCursor)
+    else:
+        return psycopg2.connect(
+            host=config.DB_HOST,
+            user=config.DB_USER,
+            password=config.DB_PASSWORD,
+            database=config.DB_NAME,
+            port=config.DB_PORT,
+            cursor_factory=RealDictCursor
+        )
 
-mysql = MySQL(app)
+class DatabaseConnection:
+    def __init__(self):
+        self.connection = None
+    
+    def cursor(self):
+        if not self.connection:
+            self.connection = get_db_connection()
+        return self.connection.cursor()
+    
+    def commit(self):
+        if self.connection:
+            self.connection.commit()
+    
+    def close(self):
+        if self.connection:
+            self.connection.close()
+            self.connection = None
 
-app.secret_key = 'your_secret_key'
+mysql = DatabaseConnection()
 
 # -------------------- DB schema bootstrap --------------------
 
@@ -1549,5 +1573,5 @@ def uploaded_file(filename):
 
 
 if __name__ == '__main__':
-
-    app.run(debug=True)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=config.FLASK_ENV == 'development')

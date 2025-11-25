@@ -20,23 +20,14 @@
 <script id="exam-data" type="application/json">{{ exam_json | safe }}</script>
 <script src="{{ url_for('static', filename='js/exam.js') }}"></script>
 <script src="{{ url_for('static', filename='js/voice.js') }}"></script>
-<div id="proctor-consent" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:2000; display:flex; align-items:center; justify-content:center;">
-    <div style="background:#fff; padding:32px; border-radius:12px; text-align:center;">
-        <h2>Proctoring Consent</h2>
-        <p>This exam requires video and audio proctoring.</p>
-        <p>Please grant permission to access your webcam and microphone.</p>
-        <button id="proctor-consent-btn" class="btn btn-primary">I Understand and Consent</button>
-    </div>
+<div id="proctoring-videobox" style="display:none; flex-direction:column; align-items:center;">
+  <video id="proctor-video" autoplay muted playsinline style="width:320px; height:240px; border:2px solid #e53935; border-radius:8px; background:#000;"></video>
+  <div id="proctor-elapsed" style="margin-top:8px; font-size:14px; color:#555;">00:00</div>
 </div>
-
-<div id="proctoring-videobox" style="position:fixed; bottom:24px; right:24px; width:320px; height:240px; background:#222; border-radius:12px; box-shadow:0 2px 16px rgba(0,0,0,0.18); z-index:1000; display:none; flex-direction:column; align-items:center; justify-content:center; padding:12px; border:2px solid #e53935;">
-    <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
-        <span style="background:#e53935; color:#fff; border-radius:4px; padding:2px 8px; font-weight:bold; font-size:14px;">REC</span>
-        <span id="proctor-elapsed" style="color:#fff; font-size:13px;">00:00</span>
-    </div>
-    <video id="proctor-video" autoplay muted playsinline style="width:100%; height:160px; background:#111; border-radius:8px; object-fit:cover;"></video>
+<div id="proctor-consent" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); color:#fff; display:flex; flex-direction:column; justify-content:center; align-items:center;">
+  <p style="margin-bottom:16px;">This exam requires webcam access for proctoring purposes. Please provide your consent to proceed.</p>
+  <button id="proctor-consent-btn" class="btn btn-primary">I Consent</button>
 </div>
-
 <script src="{{ url_for('static', filename='js/proctoring.js') }}"></script>
 <style>
 .exam-layout { display: flex; gap: 24px; }
@@ -53,19 +44,3 @@
 @keyframes pulse { 0%{ transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
 </style>
 {% endblock %}
-<body>
-    <!-- Existing exam UI -->
-    <div id="exam-root">
-        <!-- ... existing exam content ... -->
-    </div>
-    <!-- Proctoring VideoBox -->
-    <div id="proctoring-videobox" style="position:fixed; bottom:24px; right:24px; width:320px; height:240px; background:#222; border-radius:12px; box-shadow:0 2px 16px rgba(0,0,0,0.18); z-index:1000; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:12px; border:2px solid #e53935;">
-      <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
-        <span style="background:#e53935; color:#fff; border-radius:4px; padding:2px 8px; font-weight:bold; font-size:14px;">REC</span>
-        <span id="proctor-elapsed" style="color:#fff; font-size:13px;">00:00</span>
-        <span id="proctor-mic" style="color:#fff; font-size:16px; margin-left:8px;">🎤</span>
-      </div>
-      <video id="proctor-video" autoplay muted playsinline style="width:100%; height:160px; background:#111; border-radius:8px; object-fit:cover;"></video>
-    </div>
-    <script src="{{ url_for('static', filename='js/proctoring.js') }}"></script>
-</body>

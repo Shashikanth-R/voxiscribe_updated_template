@@ -21,7 +21,7 @@ document.addEventListener('DOMContentLoaded', function() {
         videoBox.style.display = 'flex';
 
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
             videoEl.srcObject = stream;
 
             // Face detection setup (using a placeholder, replace with a real library if desired)
