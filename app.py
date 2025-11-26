@@ -946,7 +946,8 @@ def proctoring_video(attempt_id):
 
     byte1, byte2 = 0, None
 
-    m = re.search('(\d+)-(\d*)', range_header)
+    import re
+    m = re.search(r'(\d+)-(\d*)', range_header)
 
     g = m.groups()
 
