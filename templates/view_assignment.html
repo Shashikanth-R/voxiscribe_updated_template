@@ -1,0 +1,173 @@
+{% extends 'layout.html' %}
+{% block title %}{{ assignment.title }} - Assignment{% endblock %}
+{% block content %}
+<h2>{{ assignment.title }}</h2>
+
+<div class="card">
+    <div class="assignment-info">
+        <p><strong>Description:</strong> {{ assignment.description or 'No description provided' }}</p>
+        <p><strong>Due Date:</strong> {{ assignment.due_date or 'No due date set' }}</p>
+        <p><strong>Type:</strong> {{ 'Question Paper Upload' if assignment.assignment_type == 'file_upload' else 'Question-based Assignment' }}</p>
+    </div>
+</div>
+
+{% if assignment.assignment_type == 'file_upload' %}
+<div class="card">
+    <h3>Question Paper</h3>
+    {% if assignment.question_paper_path %}
+    <div class="question-paper">
+        <img src="{{ url_for('uploaded_file', filename='assignments/' + assignment.question_paper_path.split('/')[-1]) }}" 
+             alt="Question Paper" style="max-width: 100%; height: auto;">
+    </div>
+    {% endif %}
+    
+    <form id="fileSubmissionForm" enctype="multipart/form-data">
+        <div class="form-group">
+            <label>Upload Your Answer Sheet:</label>
+            <input type="file" id="submission_file" accept="image/*,.pdf" required>
+        </div>
+        <button type="submit" class="btn btn-primary">Submit Assignment</button>
+    </form>
+</div>
+
+{% else %}
+<div class="card">
+    <h3>Questions</h3>
+    <form id="questionSubmissionForm">
+        {% for question in assignment.questions %}
+        <div class="question-box">
+            <h4>Q{{ loop.index }}: {{ question.question_text }} ({{ question.marks }} marks)</h4>
+            
+            {% if question.question_type == 'mcq' %}
+            <div class="mcq-options">
+                {% set options = question.options | from_json %}
+                {% for key, value in options.items() %}
+                <label class="option-label">
+                    <input type="radio" name="question_{{ question.id }}" value="{{ key }}">
+                    {{ key }}. {{ value }}
+                </label>
+                {% endfor %}
+            </div>
+            {% else %}
+            <textarea name="question_{{ question.id }}" placeholder="Enter your answer here..." rows="4"></textarea>
+            {% endif %}
+        </div>
+        {% endfor %}
+        
+        <button type="submit" class="btn btn-primary">Submit Assignment</button>
+    </form>
+</div>
+{% endif %}
+
+<script>
+{% if assignment.assignment_type == 'file_upload' %}
+document.getElementById('fileSubmissionForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const formData = new FormData();
+    const file = document.getElementById('submission_file').files[0];
+    if (file) formData.append('submission_file', file);
+    
+    try {
+        const response = await fetch('/submit_assignment/{{ assignment.id }}', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            alert('Assignment submitted successfully!');
+            window.location.href = '/student/dashboard';
+        } else {
+            alert('Error: ' + result.message);
+        }
+    } catch (error) {
+        alert('Error submitting assignment');
+    }
+});
+
+{% else %}
+document.getElementById('questionSubmissionForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const answers = [];
+    {% for question in assignment.questions %}
+    {% if question.question_type == 'mcq' %}
+    const q{{ question.id }} = document.querySelector('input[name="question_{{ question.id }}"]:checked');
+    if (q{{ question.id }}) {
+        answers.push({
+            question_id: {{ question.id }},
+            selected_option: q{{ question.id }}.value
+        });
+    }
+    {% else %}
+    const q{{ question.id }} = document.querySelector('textarea[name="question_{{ question.id }}"]');
+    if (q{{ question.id }}.value.trim()) {
+        answers.push({
+            question_id: {{ question.id }},
+            answer_text: q{{ question.id }}.value.trim()
+        });
+    }
+    {% endif %}
+    {% endfor %}
+    
+    const formData = new FormData();
+    formData.append('answers_json', JSON.stringify(answers));
+    
+    try {
+        const response = await fetch('/submit_assignment/{{ assignment.id }}', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            alert('Assignment submitted successfully!');
+            window.location.href = '/student/dashboard';
+        } else {
+            alert('Error: ' + result.message);
+        }
+    } catch (error) {
+        alert('Error submitting assignment');
+    }
+});
+{% endif %}
+</script>
+
+<style>
+.assignment-info {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 5px;
+    margin-bottom: 20px;
+}
+.question-box {
+    border: 1px solid #ddd;
+    padding: 15px;
+    margin-bottom: 15px;
+    border-radius: 5px;
+}
+.mcq-options {
+    margin-top: 10px;
+}
+.option-label {
+    display: block;
+    margin-bottom: 8px;
+    cursor: pointer;
+}
+.option-label input {
+    margin-right: 8px;
+}
+textarea {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    resize: vertical;
+}
+.question-paper {
+    text-align: center;
+    margin-bottom: 20px;
+}
+</style>
+{% endblock %}

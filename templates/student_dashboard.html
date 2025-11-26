@@ -6,12 +6,20 @@
     <a href="{{ url_for('logout') }}" class="btn btn-danger">Logout</a>
 </div>
 
+<div class="dashboard-nav">
+    <a href="{{ url_for('student_dashboard') }}" class="nav-btn active">Dashboard</a>
+    <a href="{{ url_for('student_performance') }}" class="nav-btn">Performance Analytics</a>
+</div>
+
 <div class="card">
     <h2>Student Dashboard</h2>
     <h3>Available Exams</h3>
     <ul class="exam-list" id="exam-list"></ul>
     <h3 style="margin-top:20px;">Completed Exams</h3>
     <ul class="exam-list" id="completed-list"></ul>
+    
+    <h3 style="margin-top:20px;">Available Assignments</h3>
+    <ul class="exam-list" id="assignment-list"></ul>
 </div>
 
 <script>
@@ -53,12 +61,47 @@ async function fetchExams() {
                         <span class="exam-title">${exam.title}</span>
                         <span class="exam-duration">${exam.duration} minutes</span>
                     </div>
-                    <span class="submitted"><i class="fas fa-check-circle"></i> Submitted</span>
+                    <div class="exam-actions">
+                        <span class="submitted"><i class="fas fa-check-circle"></i> Submitted</span>
+                        <a href="/student/exam_details/${exam.id}" class="btn btn-sm btn-outline">View Results</a>
+                    </div>
                 `;
                 completedList.appendChild(li);
             });
         } else {
             completedList.innerHTML = '<li>No completed exams yet.</li>';
+        }
+
+        // Fetch assignments
+        const assignmentRes = await fetch('/student/assignments');
+        const assignmentData = await assignmentRes.json();
+        const assignmentList = document.getElementById('assignment-list');
+        assignmentList.innerHTML = '';
+        
+        if (assignmentData.assignments && assignmentData.assignments.length > 0) {
+            assignmentData.assignments.forEach(assignment => {
+                const li = document.createElement('li');
+                li.className = 'exam-list-item';
+                li.innerHTML = `
+                    <div class="exam-info">
+                        <span class="exam-title">${assignment.title}</span>
+                        <span class="exam-duration">Due: ${assignment.due_date || 'No due date'}</span>
+                        <span class="assignment-type">${assignment.assignment_type === 'file_upload' ? 'File Upload' : 'Questions'}</span>
+                    </div>
+                    <div class="exam-actions">
+                        ${assignment.submitted ? 
+                            `<div>
+                                <span class="submitted ${assignment.status === 'accepted' ? 'accepted' : assignment.status === 'rejected' ? 'rejected' : 'pending'}"><i class="fas fa-check-circle"></i> ${assignment.status === 'accepted' ? 'Accepted' : assignment.status === 'rejected' ? 'Rejected' : 'Pending'}</span>
+                                ${assignment.feedback ? `<button class="btn btn-sm btn-info" onclick="showFeedback('${assignment.feedback}')">View Feedback</button>` : ''}
+                            </div>` :
+                            `<a href="/assignment/${assignment.id}" class="btn btn-primary">View Assignment</a>`
+                        }
+                    </div>
+                `;
+                assignmentList.appendChild(li);
+            });
+        } else {
+            assignmentList.innerHTML = '<li>No assignments available.</li>';
         }
 
         if (lastIds.length && ids.some(id => !lastIds.includes(id))) {
@@ -68,6 +111,10 @@ async function fetchExams() {
     }catch(e){
         // ignore
     }
+}
+
+function showFeedback(feedback) {
+    alert('Teacher Feedback:\n\n' + feedback);
 }
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -101,6 +148,50 @@ document.addEventListener('DOMContentLoaded', function() {
 .submitted {
     color: #7ed321;
     font-weight: bold;
+}
+.submitted.accepted {
+    color: #28a745;
+}
+.submitted.rejected {
+    color: #dc3545;
+}
+.submitted.pending {
+    color: #ffc107;
+}
+.exam-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.btn-outline {
+    border: 1px solid #007bff;
+    color: #007bff;
+    background: transparent;
+    padding: 4px 8px;
+    font-size: 0.8em;
+    text-decoration: none;
+    border-radius: 4px;
+}
+.btn-outline:hover {
+    background: #007bff;
+    color: white;
+}
+.dashboard-nav {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+.nav-btn {
+    padding: 10px 20px;
+    background: #f8f9fa;
+    border: 1px solid #ddd;
+    text-decoration: none;
+    color: #333;
+    border-radius: 5px;
+}
+.nav-btn.active {
+    background: #007bff;
+    color: white;
 }
 </style>
 {% endblock %}

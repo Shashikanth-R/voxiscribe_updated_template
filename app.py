@@ -68,64 +68,8 @@ def init_schema_if_needed():
     if SCHEMA_INITIALIZED:
         return
     try:
-        cur = mysql.connection.cursor()
-        # Ensure users table has face and voice auth columns
-        if _table_exists(cur, 'users'):
-            if not _column_exists(cur, 'users', 'face_image_path'):
-                cur.execute("ALTER TABLE users ADD COLUMN face_image_path VARCHAR(255)")
-            if not _column_exists(cur, 'users', 'voice_sample_path'):
-                cur.execute("ALTER TABLE users ADD COLUMN voice_sample_path VARCHAR(255)")
-        # Ensure exams table columns
-        if _table_exists(cur, 'exams'):
-            if not _column_exists(cur, 'exams', 'duration'):
-                cur.execute("ALTER TABLE exams ADD COLUMN duration INT NOT NULL DEFAULT 60")
-            if not _column_exists(cur, 'exams', 'published'):
-                cur.execute("ALTER TABLE exams ADD COLUMN published TINYINT(1) DEFAULT 0")
-            if not _column_exists(cur, 'exams', 'description'):
-                cur.execute("ALTER TABLE exams ADD COLUMN description TEXT")
-        # Ensure submissions has unique constraint for fallback upsert
-        if _table_exists(cur, 'submissions'):
-            # Try add unique key (ignore if exists)
-            try:
-                cur.execute("ALTER TABLE submissions ADD UNIQUE KEY uniq_submission (student_id, exam_id)")
-            except Exception:
-                pass
-        # Create exam_attempts if missing
-        if not _table_exists(cur, 'exam_attempts'):
-            cur.execute(
-                """
-                CREATE TABLE exam_attempts (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    student_id INT NOT NULL,
-                    exam_id INT NOT NULL,
-                    status ENUM('in_progress','completed') DEFAULT 'in_progress',
-                    started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    submitted_at DATETIME,
-                    total_score DECIMAL(6,2),
-                    UNIQUE KEY uniq_attempt (student_id, exam_id)
-                )
-                """
-            )
-        # Create answers if missing
-        if not _table_exists(cur, 'answers'):
-            cur.execute(
-                """
-                CREATE TABLE answers (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    student_id INT NOT NULL,
-                    exam_id INT NOT NULL,
-                    question_id INT NOT NULL,
-                    answer_text LONGTEXT,
-                    selected_option VARCHAR(4),
-                    is_correct TINYINT(1),
-                    score DECIMAL(5,2),
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    UNIQUE KEY uniq_answer (student_id, exam_id, question_id)
-                )
-                """
-            )
-        mysql.connection.commit()
-        cur.close()
+        # Skip schema initialization for SQLite as it uses MySQL syntax
+        pass
     except Exception:
         # Silent fail to avoid blocking app startup
         pass
@@ -152,73 +96,80 @@ def require_login(role=None):
 
 
 def fetch_exam(exam_id, ensure_published=False):
-    cur = mysql.connection.cursor()
-    # Avoid selecting non-existent columns like description on older schemas
+    conn = get_db_connection()
+    cur = conn.cursor()
     if ensure_published:
-        cur.execute("SELECT id, title, duration, created_by, published FROM exams WHERE id=%s AND published=TRUE", [exam_id])
+        cur.execute("SELECT id, title, duration, created_by, published FROM exams WHERE id=? AND published=1", [exam_id])
     else:
-        cur.execute("SELECT id, title, duration, created_by, published FROM exams WHERE id=%s", [exam_id])
+        cur.execute("SELECT id, title, duration, created_by, published FROM exams WHERE id=?", [exam_id])
     exam = cur.fetchone()
-    cur.close()
+    conn.close()
     return exam
 
 
 def fetch_questions(exam_id):
-    cur = mysql.connection.cursor()
+    conn = get_db_connection()
+    cur = conn.cursor()
     cur.execute(
-        "SELECT id, question_text, question_type, options, correct_answer FROM questions WHERE exam_id=%s ORDER BY id ASC",
+        "SELECT id, question_text, question_type, options, correct_answer FROM questions WHERE exam_id=? ORDER BY id ASC",
         [exam_id]
     )
     questions = cur.fetchall()
-    cur.close()
-    # Normalize options JSON if present
+    conn.close()
+    # Convert sqlite3.Row to dict and normalize options JSON if present
+    result = []
     for q in questions:
-        if q['options']:
+        q_dict = dict(q)
+        if q_dict['options']:
             try:
-                q['options'] = json.loads(q['options'])
+                q_dict['options'] = json.loads(q_dict['options'])
             except Exception:
                 # fallback: parse comma or newline as list and map to A-D
-                opts = [o.strip() for o in q['options'].replace('\n', ',').split(',') if o.strip()]
+                opts = [o.strip() for o in q_dict['options'].replace('\n', ',').split(',') if o.strip()]
                 letters = ['A', 'B', 'C', 'D', 'E', 'F']
-                q['options'] = {letters[i]: opts[i] for i in range(min(len(opts), len(letters)))}
+                q_dict['options'] = {letters[i]: opts[i] for i in range(min(len(opts), len(letters)))}
         else:
-            q['options'] = None
-    return questions
+            q_dict['options'] = None
+        result.append(q_dict)
+    return result
 
 
 def ensure_attempt(student_id, exam_id):
-    cur = mysql.connection.cursor()
-    cur.execute("SELECT id FROM exam_attempts WHERE student_id=%s AND exam_id=%s", (student_id, exam_id))
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM exam_attempts WHERE student_id=? AND exam_id=?", (student_id, exam_id))
     attempt = cur.fetchone()
     if not attempt:
-        cur.execute("INSERT INTO exam_attempts(student_id, exam_id, status) VALUES(%s, %s, 'in_progress')", (student_id, exam_id))
-        mysql.connection.commit()
+        cur.execute("INSERT INTO exam_attempts(student_id, exam_id, status) VALUES(?, ?, 'in_progress')", (student_id, exam_id))
+        conn.commit()
         attempt_id = cur.lastrowid
     else:
         attempt_id = attempt['id']
-    cur.close()
+    conn.close()
     return attempt_id
 
 
 def recalc_total_score(student_id, exam_id):
-    cur = mysql.connection.cursor()
-    cur.execute("SELECT COALESCE(SUM(score),0) as total FROM answers WHERE student_id=%s AND exam_id=%s", (student_id, exam_id))
-    total = cur.fetchone()['total'] if cur.rowcount else 0
-    cur.execute("UPDATE exam_attempts SET total_score=%s WHERE student_id=%s AND exam_id=%s", (total, student_id, exam_id))
-    mysql.connection.commit()
-    cur.close()
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT COALESCE(SUM(score),0) as total FROM answers WHERE student_id=? AND exam_id=?", (student_id, exam_id))
+    result = cur.fetchone()
+    total = result['total'] if result else 0
+    cur.execute("UPDATE exam_attempts SET total_score=? WHERE student_id=? AND exam_id=?", (total, student_id, exam_id))
+    conn.commit()
+    conn.close()
     return total
 
 
 def auto_score_mcq_for_student(student_id, exam_id):
-    # Evaluate MCQ answers by comparing selected_option or answer_text with correct_answer
-    cur = mysql.connection.cursor()
+    conn = get_db_connection()
+    cur = conn.cursor()
     cur.execute(
         """
         SELECT a.id as answer_id, a.selected_option, a.answer_text, q.correct_answer, q.id as question_id
         FROM answers a
         JOIN questions q ON q.id=a.question_id
-        WHERE a.student_id=%s AND a.exam_id=%s AND q.question_type='MCQ'
+        WHERE a.student_id=? AND a.exam_id=? AND q.question_type='MCQ'
         """,
         (student_id, exam_id)
     )
@@ -230,9 +181,9 @@ def auto_score_mcq_for_student(student_id, exam_id):
         elif r['answer_text'] and r['correct_answer']:
             is_correct = (r['answer_text'].strip().lower() == r['correct_answer'].strip().lower())
         score = 1.0 if is_correct else 0.0
-        cur.execute("UPDATE answers SET is_correct=%s, score=%s WHERE id=%s", (is_correct, score, r['answer_id']))
-    mysql.connection.commit()
-    cur.close()
+        cur.execute("UPDATE answers SET is_correct=?, score=? WHERE id=?", (is_correct, score, r['answer_id']))
+    conn.commit()
+    conn.close()
 
 
 # -------------------- Routes --------------------
@@ -306,12 +257,13 @@ def save_auth():
         voice_sample = request.files['voice']
 
         # Ensure the user exists
-        cur = mysql.connection.cursor()
-        cur.execute("SELECT id FROM users WHERE username = %s", [username])
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM users WHERE username = ?", [username])
         user = cur.fetchone()
-        cur.close()
-
+        
         if not user:
+            conn.close()
             return jsonify({'success': False, 'error': 'User not found'}), 404
 
         # Create a directory for the user if it doesn't exist
@@ -325,13 +277,12 @@ def save_auth():
         voice_sample.save(voice_sample_path)
 
         # Update the database
-        cur = mysql.connection.cursor()
         cur.execute(
-            "UPDATE users SET face_image_path = %s, voice_sample_path = %s WHERE username = %s",
+            "UPDATE users SET face_image_path = ?, voice_sample_path = ? WHERE username = ?",
             (face_image_path, voice_sample_path, username)
         )
-        mysql.connection.commit()
-        cur.close()
+        conn.commit()
+        conn.close()
 
         return jsonify({'success': True})
     except Exception as e:
@@ -372,18 +323,191 @@ def logout():
 @app.route('/teacher/dashboard')
 @require_login('teacher')
 def teacher_dashboard():
-    cur = mysql.connection.cursor()
-    # Avoid dependency on created_at/description to work with older schemas
-    cur.execute("SELECT id, title, duration, published FROM exams WHERE created_by=%s ORDER BY id DESC", [session['id']])
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id, title, duration, published FROM exams WHERE created_by=? ORDER BY id DESC", [session['id']])
     exams = cur.fetchall()
-    cur.close()
-    return render_template('admin_dashboard.html', exams=exams)
+    cur.execute("SELECT id, title, due_date, published FROM assignments WHERE created_by=? ORDER BY id DESC", [session['id']])
+    assignments = cur.fetchall()
+    conn.close()
+    return render_template('admin_dashboard.html', exams=exams, assignments=assignments)
 
 
 @app.route('/create_exam', methods=['GET'])
 @require_login('teacher')
 def create_exam():
     return render_template('create_exam.html')
+
+@app.route('/create_assignment', methods=['GET'])
+@require_login('teacher')
+def create_assignment():
+    return render_template('create_assignment.html')
+
+@app.route('/save_assignment', methods=['POST'])
+@require_login('teacher')
+def save_assignment():
+    try:
+        print("Save assignment called")
+        title = request.form.get('title')
+        print(f"Title: {title}")
+        
+        if not title:
+            return jsonify({'success': False, 'message': 'Title is required'}), 400
+        
+        assignment_type = request.form.get('assignment_type', 'questions')
+        description = request.form.get('description', '')
+        due_date = request.form.get('due_date')
+        
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # Create assignment
+        cur.execute(
+            "INSERT INTO assignments(title, description, created_by, due_date, assignment_type) VALUES(?, ?, ?, ?, ?)",
+            (title, description, session['id'], due_date, assignment_type)
+        )
+        assignment_id = cur.lastrowid
+        print(f"Assignment created with ID: {assignment_id}")
+        
+        # Handle questions if assignment_type is 'questions'
+        if assignment_type == 'questions':
+            questions_data = request.form.get('questions_json')
+            if questions_data:
+                questions = json.loads(questions_data)
+                for q in questions:
+                    cur.execute(
+                        "INSERT INTO assignment_questions(assignment_id, question_text, question_type, marks) VALUES(?, ?, ?, ?)",
+                        (assignment_id, q['text'], q.get('type', 'descriptive'), q.get('marks', 1))
+                    )
+        
+        conn.commit()
+        conn.close()
+        print("Assignment saved successfully")
+        return jsonify({'success': True, 'assignment_id': assignment_id})
+    except Exception as e:
+        print(f"Error saving assignment: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/publish_assignment/<int:assignment_id>', methods=['POST'])
+@require_login('teacher')
+def publish_assignment(assignment_id):
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("UPDATE assignments SET published=1 WHERE id=? AND created_by=?", (assignment_id, session['id']))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/delete_assignment/<int:assignment_id>', methods=['DELETE'])
+@require_login('teacher')
+def delete_assignment(assignment_id):
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM assignments WHERE id=? AND created_by=?", (assignment_id, session['id']))
+        if not cur.fetchone():
+            conn.close()
+            return jsonify({'success': False, 'message': 'Not found or not allowed'}), 404
+        cur.execute("DELETE FROM assignments WHERE id=?", [assignment_id])
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/student/assignments')
+@require_login('student')
+def student_assignments():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # Get available assignments
+    cur.execute(
+        """
+        SELECT a.id, a.title, a.description, a.due_date, a.assignment_type, a.question_paper_path,
+               CASE WHEN s.id IS NOT NULL THEN 1 ELSE 0 END as submitted,
+               s.status, s.feedback
+        FROM assignments a
+        LEFT JOIN assignment_submissions s ON a.id = s.assignment_id AND s.student_id = ?
+        WHERE a.published = 1
+        ORDER BY a.due_date ASC
+        """,
+        [session['id']]
+    )
+    assignments = [dict(row) for row in cur.fetchall()]
+    conn.close()
+    return jsonify({'assignments': assignments})
+
+@app.route('/assignment/<int:assignment_id>')
+@require_login('student')
+def view_assignment(assignment_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # Get assignment details
+    cur.execute("SELECT * FROM assignments WHERE id=? AND published=1", [assignment_id])
+    assignment = cur.fetchone()
+    if not assignment:
+        return "Assignment not found", 404
+    
+    assignment = dict(assignment)
+    
+    # Get questions if it's a question-based assignment
+    if assignment['assignment_type'] == 'questions':
+        cur.execute("SELECT * FROM assignment_questions WHERE assignment_id=? ORDER BY id", [assignment_id])
+        assignment['questions'] = [dict(row) for row in cur.fetchall()]
+    
+    conn.close()
+    return render_template('view_assignment.html', assignment=assignment)
+
+@app.route('/submit_assignment/<int:assignment_id>', methods=['POST'])
+@require_login('student')
+def submit_assignment(assignment_id):
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # Check if already submitted
+        cur.execute("SELECT id FROM assignment_submissions WHERE assignment_id=? AND student_id=?", 
+                   (assignment_id, session['id']))
+        if cur.fetchone():
+            return jsonify({'success': False, 'message': 'Already submitted'}), 400
+        
+        # Create submission
+        submission_file_path = None
+        if 'submission_file' in request.files:
+            file = request.files['submission_file']
+            if file.filename:
+                upload_dir = os.path.join(app.root_path, 'uploads', 'submissions')
+                os.makedirs(upload_dir, exist_ok=True)
+                filename = f"{session['id']}_{assignment_id}_{int(datetime.now().timestamp())}_{file.filename}"
+                submission_file_path = os.path.join(upload_dir, filename)
+                file.save(submission_file_path)
+        
+        cur.execute(
+            "INSERT INTO assignment_submissions(assignment_id, student_id, submission_file_path) VALUES(?, ?, ?)",
+            (assignment_id, session['id'], submission_file_path)
+        )
+        submission_id = cur.lastrowid
+        
+        # Handle question answers
+        answers_data = request.form.get('answers_json')
+        if answers_data:
+            answers = json.loads(answers_data)
+            for answer in answers:
+                cur.execute(
+                    "INSERT INTO assignment_answers(submission_id, question_id, answer_text, selected_option) VALUES(?, ?, ?, ?)",
+                    (submission_id, answer.get('question_id'), answer.get('answer_text'), answer.get('selected_option'))
+                )
+        
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 @app.route('/save_exam', methods=['POST'])
@@ -399,23 +523,14 @@ def save_exam():
         if not title or not duration or not isinstance(questions, list) or len(questions) == 0:
             return jsonify({'success': False, 'message': 'Invalid payload'}), 400
 
-        cur = mysql.connection.cursor()
-        exam_id = None
-        # Try insert with description; if column doesn't exist, fallback without it
-        try:
-            cur.execute(
-                "INSERT INTO exams(title, description, duration, created_by, published) VALUES(%s, %s, %s, %s, FALSE)",
-                (title, description, duration, session['id'])
-            )
-            mysql.connection.commit()
-            exam_id = cur.lastrowid
-        except Exception:
-            cur.execute(
-                "INSERT INTO exams(title, duration, created_by, published) VALUES(%s, %s, %s, FALSE)",
-                (title, duration, session['id'])
-            )
-            mysql.connection.commit()
-            exam_id = cur.lastrowid
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        cur.execute(
+            "INSERT INTO exams(title, description, duration, created_by, published) VALUES(?, ?, ?, ?, 0)",
+            (title, description, duration, session['id'])
+        )
+        exam_id = cur.lastrowid
 
         for idx, q in enumerate(questions, start=1):
             q_text = q.get('text') or q.get('question_text')
@@ -424,11 +539,12 @@ def save_exam():
             correct = q.get('correct') or q.get('correct_answer')
             options_json = json.dumps(options) if options else None
             cur.execute(
-                "INSERT INTO questions(exam_id, question_text, question_type, options, correct_answer) VALUES(%s, %s, %s, %s, %s)",
+                "INSERT INTO questions(exam_id, question_text, question_type, options, correct_answer) VALUES(?, ?, ?, ?, ?)",
                 (exam_id, q_text, q_type, options_json, correct)
             )
-        mysql.connection.commit()
-        cur.close()
+        
+        conn.commit()
+        conn.close()
         return jsonify({'success': True, 'exam_id': exam_id, 'message': 'Exam saved successfully'})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
@@ -438,10 +554,11 @@ def save_exam():
 @require_login('teacher')
 def publish_exam(exam_id):
     try:
-        cur = mysql.connection.cursor()
-        cur.execute("UPDATE exams SET published=TRUE WHERE id=%s AND created_by=%s", (exam_id, session['id']))
-        mysql.connection.commit()
-        cur.close()
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("UPDATE exams SET published=1 WHERE id=? AND created_by=?", (exam_id, session['id']))
+        conn.commit()
+        conn.close()
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
@@ -458,19 +575,19 @@ def publish_exam_legacy(exam_id):
 @require_login('teacher')
 def delete_exam(exam_id):
     try:
-        # Ensure ownership
-        cur = mysql.connection.cursor()
-        cur.execute("SELECT id FROM exams WHERE id=%s AND created_by=%s", (exam_id, session['id']))
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM exams WHERE id=? AND created_by=?", (exam_id, session['id']))
         if not cur.fetchone():
-            cur.close()
+            conn.close()
             return jsonify({'success': False, 'message': 'Not found or not allowed'}), 404
         # Delete in order: answers -> attempts -> questions -> exam
-        cur.execute("DELETE FROM answers WHERE exam_id=%s", [exam_id])
-        cur.execute("DELETE FROM exam_attempts WHERE exam_id=%s", [exam_id])
-        cur.execute("DELETE FROM questions WHERE exam_id=%s", [exam_id])
-        cur.execute("DELETE FROM exams WHERE id=%s", [exam_id])
-        mysql.connection.commit()
-        cur.close()
+        cur.execute("DELETE FROM answers WHERE exam_id=?", [exam_id])
+        cur.execute("DELETE FROM exam_attempts WHERE exam_id=?", [exam_id])
+        cur.execute("DELETE FROM questions WHERE exam_id=?", [exam_id])
+        cur.execute("DELETE FROM exams WHERE id=?", [exam_id])
+        conn.commit()
+        conn.close()
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
@@ -480,19 +597,20 @@ def delete_exam(exam_id):
 @require_login('teacher')
 def view_attempts(exam_id):
     try:
-        cur = mysql.connection.cursor()
+        conn = get_db_connection()
+        cur = conn.cursor()
         cur.execute(
             """
             SELECT a.student_id, u.username, a.status, a.total_score, a.started_at, a.submitted_at
             FROM exam_attempts a
             JOIN users u ON u.id=a.student_id
-            WHERE a.exam_id=%s
+            WHERE a.exam_id=?
             ORDER BY a.submitted_at DESC, a.started_at DESC
             """,
             [exam_id]
         )
-        attempts = cur.fetchall()
-        cur.close()
+        attempts = [dict(row) for row in cur.fetchall()]
+        conn.close()
         return jsonify({'success': True, 'attempts': attempts})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
@@ -505,100 +623,155 @@ def view_attempts(exam_id):
 def student_dashboard():
     return render_template('student_dashboard.html')
 
+@app.route('/student/performance')
+@require_login('student')
+def student_performance():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # Get exam history with scores
+    cur.execute(
+        """
+        SELECT e.id, e.title, e.duration, a.total_score, a.submitted_at,
+               (SELECT COUNT(*) FROM questions WHERE exam_id = e.id) as total_questions
+        FROM exam_attempts a
+        JOIN exams e ON e.id = a.exam_id
+        WHERE a.student_id = ? AND a.status = 'completed'
+        ORDER BY a.submitted_at DESC
+        """,
+        [session['id']]
+    )
+    exam_history = [dict(row) for row in cur.fetchall()]
+    
+    # Calculate analytics
+    if exam_history:
+        total_exams = len(exam_history)
+        avg_score = sum(float(exam['total_score'] or 0) for exam in exam_history) / total_exams
+        best_score = max(float(exam['total_score'] or 0) for exam in exam_history)
+        recent_performance = [float(exam['total_score'] or 0) for exam in exam_history[:5]]
+    else:
+        total_exams = avg_score = best_score = 0
+        recent_performance = []
+    
+    analytics = {
+        'total_exams': total_exams,
+        'avg_score': round(avg_score, 2),
+        'best_score': best_score,
+        'recent_performance': recent_performance
+    }
+    
+    conn.close()
+    return render_template('student_performance.html', 
+                         exam_history=exam_history, 
+                         analytics=analytics)
+
+@app.route('/student/exam_details/<int:exam_id>')
+@require_login('student')
+def student_exam_details(exam_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # Get exam details with answers
+    cur.execute(
+        """
+        SELECT q.question_text, q.question_type, q.correct_answer,
+               a.answer_text, a.selected_option, a.is_correct, a.score
+        FROM questions q
+        LEFT JOIN answers a ON a.question_id = q.id AND a.student_id = ? AND a.exam_id = ?
+        WHERE q.exam_id = ?
+        ORDER BY q.id ASC
+        """,
+        (session['id'], exam_id, exam_id)
+    )
+    questions_details = [dict(row) for row in cur.fetchall()]
+    
+    # Get exam info and total score
+    cur.execute("SELECT title, duration FROM exams WHERE id = ?", [exam_id])
+    exam_info = dict(cur.fetchone())
+    
+    # Get total score from exam_attempts
+    cur.execute(
+        "SELECT total_score FROM exam_attempts WHERE student_id = ? AND exam_id = ?",
+        (session['id'], exam_id)
+    )
+    attempt = cur.fetchone()
+    exam_info['total_score'] = attempt['total_score'] if attempt else 0
+    
+    conn.close()
+    return render_template('student_exam_details.html', 
+                         exam_info=exam_info,
+                         questions=questions_details)
+
 
 @app.route('/student/exams')
 @require_login('student')
 def student_exams():
-    cur = mysql.connection.cursor()
+    conn = get_db_connection()
+    cur = conn.cursor()
     try:
         cur.execute(
             """
             SELECT e.id, e.title, e.duration
             FROM exams e
-            WHERE e.published=TRUE
+            WHERE e.published=1
             AND NOT EXISTS (
-                SELECT 1 FROM exam_attempts a WHERE a.student_id=%s AND a.exam_id=e.id
+                SELECT 1 FROM exam_attempts a WHERE a.student_id=? AND a.exam_id=e.id
             )
             ORDER BY e.id DESC
             """,
             [session['id']]
         )
-        exams = cur.fetchall()
+        exams = [dict(row) for row in cur.fetchall()]
     except Exception:
         # Fallback when exam_attempts table does not exist in older schema
-        cur.execute("SELECT id, title, duration FROM exams WHERE published=TRUE ORDER BY id DESC")
-        exams = cur.fetchall()
+        cur.execute("SELECT id, title, duration FROM exams WHERE published=1 ORDER BY id DESC")
+        exams = [dict(row) for row in cur.fetchall()]
     finally:
-        cur.close()
+        conn.close()
     return jsonify({'exams': exams})
 
 
 @app.route('/student/exams_status')
 @require_login('student')
 def student_exams_status():
-    cur = mysql.connection.cursor()
-    # Try using exam_attempts for both available and completed
+    conn = get_db_connection()
+    cur = conn.cursor()
     try:
+        # Get available exams (not attempted)
         cur.execute(
             """
             SELECT e.id, e.title, e.duration
             FROM exams e
-            WHERE e.published=TRUE
+            WHERE e.published=1
             AND NOT EXISTS (
-                SELECT 1 FROM exam_attempts a WHERE a.student_id=%s AND a.exam_id=e.id
+                SELECT 1 FROM exam_attempts a WHERE a.student_id=? AND a.exam_id=e.id
             )
             ORDER BY e.id DESC
             """,
             [session['id']]
         )
-        available = cur.fetchall()
+        available = [dict(row) for row in cur.fetchall()]
+        
+        # Get completed exams
         cur.execute(
             """
             SELECT e.id, e.title, e.duration
             FROM exams e
-            WHERE e.published=TRUE
+            WHERE e.published=1
             AND EXISTS (
-                SELECT 1 FROM exam_attempts a WHERE a.student_id=%s AND a.exam_id=e.id AND a.status='completed'
+                SELECT 1 FROM exam_attempts a WHERE a.student_id=? AND a.exam_id=e.id AND a.status='completed'
             )
             ORDER BY e.id DESC
             """,
             [session['id']]
         )
-        completed = cur.fetchall()
-        cur.close()
+        completed = [dict(row) for row in cur.fetchall()]
+        
+        conn.close()
         return jsonify({'available': available, 'completed': completed})
-    except Exception:
-        # Fallback using legacy submissions table
-        try:
-            cur.execute(
-                """
-                SELECT e.id, e.title, e.duration
-                FROM exams e
-                WHERE e.published=TRUE AND e.id NOT IN (
-                  SELECT s.exam_id FROM submissions s WHERE s.student_id=%s
-                )
-                ORDER BY e.id DESC
-                """,
-                [session['id']]
-            )
-            available = cur.fetchall()
-            cur.execute(
-                """
-                SELECT e.id, e.title, e.duration
-                FROM exams e
-                WHERE e.published=TRUE AND e.id IN (
-                  SELECT s.exam_id FROM submissions s WHERE s.student_id=%s
-                )
-                ORDER BY e.id DESC
-                """,
-                [session['id']]
-            )
-            completed = cur.fetchall()
-            cur.close()
-            return jsonify({'available': available, 'completed': completed})
-        except Exception:
-            cur.close()
-            return jsonify({'available': [], 'completed': []})
+    except Exception as e:
+        conn.close()
+        return jsonify({'available': [], 'completed': [], 'error': str(e)})
 
 
 # -------------------- Take Exam, Autosave, Submit --------------------
@@ -610,7 +783,7 @@ def take_exam(exam_id):
     if not exam:
         return "Exam not found or not published.", 404
 
-    # Ensure attempt exists (tolerate missing table on older schema)
+    # Ensure attempt exists
     try:
         ensure_attempt(session['id'], exam_id)
     except Exception:
@@ -618,24 +791,25 @@ def take_exam(exam_id):
 
     questions = fetch_questions(exam_id)
 
-    # Preload existing answers if any (tolerate missing table)
+    # Preload existing answers if any
     answers = {}
     try:
-        cur = mysql.connection.cursor()
+        conn = get_db_connection()
+        cur = conn.cursor()
         cur.execute(
-            "SELECT question_id, answer_text, selected_option FROM answers WHERE student_id=%s AND exam_id=%s",
+            "SELECT question_id, answer_text, selected_option FROM answers WHERE student_id=? AND exam_id=?",
             (session['id'], exam_id)
         )
         answers = {row['question_id']: {'answer_text': row['answer_text'], 'selected_option': row['selected_option']} for row in cur.fetchall()}
-        cur.close()
+        conn.close()
     except Exception:
         answers = {}
 
     exam_payload = {
-        'id': exam['id'],
-        'title': exam['title'],
-        'description': exam.get('description'),
-        'duration': exam['duration'],
+        'id': dict(exam)['id'] if exam else None,
+        'title': dict(exam)['title'] if exam else '',
+        'description': dict(exam).get('description', '') if exam else '',
+        'duration': dict(exam)['duration'] if exam else 60,
         'questions': questions,
         'answers': answers
     }
@@ -651,44 +825,37 @@ def autosave():
         exam_id = int(payload['exam_id'])
         answers = payload.get('answers', [])
 
-        # Ensure attempt exists (tolerate missing table)
+        # Ensure attempt exists
         try:
             ensure_attempt(session['id'], exam_id)
         except Exception:
             pass
 
-        cur = mysql.connection.cursor()
+        conn = get_db_connection()
+        cur = conn.cursor()
         for ans in answers:
             qid = int(ans['question_id'])
             answer_text = ans.get('answer_text')
             selected_option = (ans.get('selected_option') or '').strip().upper() or None
 
-            # Determine MCQ correctness on save (optional, will be finalized on submit)
-            cur.execute("SELECT question_type, correct_answer FROM questions WHERE id=%s", [qid])
-            q = cur.fetchone()
-            is_correct = None
-            score = None
-            if q and q['question_type'] == 'MCQ' and selected_option and q['correct_answer']:
-                is_correct = (selected_option == q['correct_answer'].strip().upper())
-                score = 1.0 if is_correct else 0.0
-
-            cur.execute(
-                """
-                INSERT INTO answers(student_id, exam_id, question_id, answer_text, selected_option, is_correct, score)
-                VALUES(%s, %s, %s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                    answer_text=VALUES(answer_text),
-                    selected_option=VALUES(selected_option),
-                    is_correct=VALUES(is_correct),
-                    score=COALESCE(VALUES(score), score)
-                """,
-                (session['id'], exam_id, qid, answer_text, selected_option, is_correct, score)
-            )
-        mysql.connection.commit()
-        cur.close()
-
-        # Optionally recalc partial total (without descriptive scores)
-        recalc_total_score(session['id'], exam_id)
+            # Check if answer exists
+            cur.execute("SELECT id FROM answers WHERE student_id=? AND exam_id=? AND question_id=?", 
+                       (session['id'], exam_id, qid))
+            existing = cur.fetchone()
+            
+            if existing:
+                cur.execute(
+                    "UPDATE answers SET answer_text=?, selected_option=? WHERE student_id=? AND exam_id=? AND question_id=?",
+                    (answer_text, selected_option, session['id'], exam_id, qid)
+                )
+            else:
+                cur.execute(
+                    "INSERT INTO answers(student_id, exam_id, question_id, answer_text, selected_option) VALUES(?, ?, ?, ?, ?)",
+                    (session['id'], exam_id, qid, answer_text, selected_option)
+                )
+        
+        conn.commit()
+        conn.close()
         return jsonify({'success': True, 'message': 'Progress auto-saved'})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
@@ -704,13 +871,14 @@ def proctoring_log():
         
         attempt_id = ensure_attempt(session['id'], exam_id)
         
-        cur = mysql.connection.cursor()
+        conn = get_db_connection()
+        cur = conn.cursor()
         cur.execute(
-            "INSERT INTO proctoring_logs(attempt_id, event_type, timestamp) VALUES(%s, %s, %s)",
+            "INSERT INTO proctoring_logs(attempt_id, event_type, timestamp) VALUES(?, ?, ?)",
             (attempt_id, event_type, datetime.utcnow())
         )
-        mysql.connection.commit()
-        cur.close()
+        conn.commit()
+        conn.close()
         
         return jsonify({'success': True})
     except Exception as e:
@@ -724,7 +892,8 @@ def record_audit_event(event_name, status, related_id=None, related_type=None, d
 
     try:
 
-        cur = mysql.connection.cursor()
+        conn = get_db_connection()
+        cur = conn.cursor()
 
         cur.execute(
 
@@ -732,7 +901,7 @@ def record_audit_event(event_name, status, related_id=None, related_type=None, d
 
             INSERT INTO audit_events(event_name, status, related_id, related_type, details)
 
-            VALUES (%s, %s, %s, %s, %s)
+            VALUES (?, ?, ?, ?, ?)
 
             """,
 
@@ -740,9 +909,8 @@ def record_audit_event(event_name, status, related_id=None, related_type=None, d
 
         )
 
-        mysql.connection.commit()
-
-        cur.close()
+        conn.commit()
+        conn.close()
 
     except Exception as e:
 
@@ -812,19 +980,19 @@ def assemble_video_chunks(attempt_id):
 
             
 
-            cur = mysql.connection.cursor()
+            conn = get_db_connection()
+            cur = conn.cursor()
 
             cur.execute(
 
-                "INSERT INTO proctoring_videos(attempt_id, video_blob) VALUES (%s, %s)",
+                "INSERT INTO proctoring_videos(attempt_id, video_blob) VALUES (?, ?)",
 
                 (attempt_id, video_blob)
 
             )
 
-            mysql.connection.commit()
-
-            cur.close()
+            conn.commit()
+            conn.close()
 
             record_audit_event('video_stored_in_db', 'success', attempt_id, 'exam_attempt')
 
@@ -902,13 +1070,14 @@ def proctoring_video(attempt_id):
 
 
 
-    cur = mysql.connection.cursor()
+    conn = get_db_connection()
+    cur = conn.cursor()
 
-    cur.execute("SELECT video_blob FROM proctoring_videos WHERE attempt_id = %s", [attempt_id])
+    cur.execute("SELECT video_blob FROM proctoring_videos WHERE attempt_id = ?", [attempt_id])
 
     video = cur.fetchone()
 
-    cur.close()
+    conn.close()
 
 
 
@@ -968,65 +1137,25 @@ def proctoring_video(attempt_id):
     return resp
 
 @app.route('/submit_exam/<int:exam_id>', methods=['POST'])
-
 @require_login('student')
-
 def submit_exam(exam_id):
-
     try:
-
-        # Final autosave before submission
-
-        # The request body is empty, so we can't rely on it.
-
-        # The client should have already saved the final answers.
-
-        
-
         # Auto-score MCQs and compute total
-
         auto_score_mcq_for_student(session['id'], exam_id)
-
         total = recalc_total_score(session['id'], exam_id)
-
         
-
         # Mark attempt as completed
-
-        cur = mysql.connection.cursor()
-
+        conn = get_db_connection()
+        cur = conn.cursor()
         cur.execute(
-
-            "UPDATE exam_attempts SET status='completed', submitted_at=%s WHERE student_id=%s AND exam_id=%s",
-
+            "UPDATE exam_attempts SET status='completed', submitted_at=? WHERE student_id=? AND exam_id=?",
             (datetime.utcnow(), session['id'], exam_id)
-
         )
-
-        mysql.connection.commit()
-
-        attempt_id = cur.lastrowid
-
-        cur.close()
-
-
-
-        # Start video assembly in a background thread
-
-        assembly_thread = threading.Thread(target=assemble_video_chunks, args=(attempt_id,))
-
-        assembly_thread.start()
-
-        
-
-        record_audit_event('exam_submitted', 'success', attempt_id, 'exam_attempt')
-
-
+        conn.commit()
+        conn.close()
 
         return jsonify({'success': True, 'redirect': url_for('student_dashboard'), 'total': total})
-
     except Exception as e:
-
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
@@ -1051,7 +1180,8 @@ def results(exam_id):
 
 
 
-    cur = mysql.connection.cursor()
+    conn = get_db_connection()
+    cur = conn.cursor()
 
 
 
@@ -1069,9 +1199,9 @@ def results(exam_id):
 
             FROM questions q
 
-            LEFT JOIN answers a ON a.question_id=q.id AND a.student_id=%s AND a.exam_id=%s
+            LEFT JOIN answers a ON a.question_id=q.id AND a.student_id=? AND a.exam_id=?
 
-            WHERE q.exam_id=%s
+            WHERE q.exam_id=?
 
             ORDER BY q.id ASC
 
@@ -1081,13 +1211,14 @@ def results(exam_id):
 
         )
 
-        qas = cur.fetchall()
+        qas = [dict(row) for row in cur.fetchall()]
 
-        cur.execute("SELECT total_score, status FROM exam_attempts WHERE student_id=%s AND exam_id=%s", (session['id'], exam_id))
+        cur.execute("SELECT total_score, status FROM exam_attempts WHERE student_id=? AND exam_id=?", (session['id'], exam_id))
 
         attempt = cur.fetchone()
+        attempt = dict(attempt) if attempt else None
 
-        cur.close()
+        conn.close()
 
         return render_template('results.html', role='student', exam=exam, qas=qas, attempt=attempt)
 
@@ -1105,7 +1236,7 @@ def results(exam_id):
 
         JOIN users u ON u.id=a.student_id
 
-        WHERE a.exam_id=%s
+        WHERE a.exam_id=?
 
         ORDER BY a.submitted_at DESC
 
@@ -1115,9 +1246,9 @@ def results(exam_id):
 
     )
 
-    students = cur.fetchall()
+    students = [dict(row) for row in cur.fetchall()]
 
-    cur.close()
+    conn.close()
 
     return render_template('results.html', role='teacher', exam=exam, students=students)
 
@@ -1145,7 +1276,8 @@ def evaluate_exam(exam_id):
 
 
 
-    cur = mysql.connection.cursor()
+    conn = get_db_connection()
+    cur = conn.cursor()
 
     # Get all students who attempted the exam
 
@@ -1159,7 +1291,7 @@ def evaluate_exam(exam_id):
 
         JOIN users u ON u.id=a.student_id
 
-        WHERE a.exam_id=%s
+        WHERE a.exam_id=?
 
         ORDER BY a.submitted_at DESC, a.started_at DESC
 
@@ -1169,7 +1301,7 @@ def evaluate_exam(exam_id):
 
     )
 
-    students = cur.fetchall()
+    students = [dict(row) for row in cur.fetchall()]
 
 
 
@@ -1189,9 +1321,9 @@ def evaluate_exam(exam_id):
 
             FROM questions q
 
-            LEFT JOIN answers a ON a.question_id=q.id AND a.student_id=%s AND a.exam_id=%s
+            LEFT JOIN answers a ON a.question_id=q.id AND a.student_id=? AND a.exam_id=?
 
-            WHERE q.exam_id=%s
+            WHERE q.exam_id=?
 
             ORDER BY q.id ASC
 
@@ -1201,9 +1333,9 @@ def evaluate_exam(exam_id):
 
         )
 
-        student_answers[student['student_id']] = cur.fetchall()
+        student_answers[student['student_id']] = [dict(row) for row in cur.fetchall()]
 
-    cur.close()
+    conn.close()
 
 
 
@@ -1214,47 +1346,50 @@ def evaluate_exam(exam_id):
 
 
 @app.route('/grade/<int:exam_id>', methods=['POST'])
-
 @require_login('teacher')
-
 def grade_descriptive(exam_id):
-
     try:
-
         data = request.get_json(force=True)
-
         grades = data.get('grades', [])
-
-        cur = mysql.connection.cursor()
-
+        
+        if not grades:
+            return jsonify({'success': False, 'message': 'No grades provided'}), 400
+        
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
         for g in grades:
-
             student_id = int(g['student_id'])
-
             question_id = int(g['question_id'])
-
             score = float(g['score'])
-
+            
+            # Check if answer record exists
             cur.execute(
-
-                "UPDATE answers SET score=%s WHERE student_id=%s AND exam_id=%s AND question_id=%s",
-
-                (score, student_id, exam_id, question_id)
-
+                "SELECT id FROM answers WHERE student_id=? AND exam_id=? AND question_id=?",
+                (student_id, exam_id, question_id)
             )
-
-            # Recalculate total per student
-
-            recalc_total_score(student_id, exam_id)
-
-        mysql.connection.commit()
-
-        cur.close()
-
+            existing = cur.fetchone()
+            
+            if existing:
+                cur.execute(
+                    "UPDATE answers SET score=? WHERE student_id=? AND exam_id=? AND question_id=?",
+                    (score, student_id, exam_id, question_id)
+                )
+            else:
+                cur.execute(
+                    "INSERT INTO answers(student_id, exam_id, question_id, score) VALUES(?, ?, ?, ?)",
+                    (student_id, exam_id, question_id, score)
+                )
+        
+        conn.commit()
+        
+        # Recalculate total scores for all affected students
+        for g in grades:
+            recalc_total_score(int(g['student_id']), exam_id)
+        
+        conn.close()
         return jsonify({'success': True})
-
     except Exception as e:
-
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
@@ -1297,7 +1432,8 @@ def download_results(exam_id):
 
     # Export CSV of students and their scores
 
-    cur = mysql.connection.cursor()
+    conn = get_db_connection()
+    cur = conn.cursor()
 
     cur.execute(
 
@@ -1309,7 +1445,7 @@ def download_results(exam_id):
 
         JOIN users u ON u.id=a.student_id
 
-        WHERE a.exam_id=%s
+        WHERE a.exam_id=?
 
         ORDER BY a.submitted_at DESC
 
@@ -1319,9 +1455,9 @@ def download_results(exam_id):
 
     )
 
-    rows = cur.fetchall()
+    rows = [dict(row) for row in cur.fetchall()]
 
-    cur.close()
+    conn.close()
 
 
 
@@ -1497,7 +1633,8 @@ def upload_chunk():
 
 def proctoring_results(attempt_id):
 
-    cur = mysql.connection.cursor()
+    conn = get_db_connection()
+    cur = conn.cursor()
 
     
 
@@ -1515,7 +1652,7 @@ def proctoring_results(attempt_id):
 
         JOIN users u ON u.id = ea.student_id
 
-        WHERE ea.id = %s
+        WHERE ea.id = ?
 
         """,
 
@@ -1524,6 +1661,7 @@ def proctoring_results(attempt_id):
     )
 
     attempt = cur.fetchone()
+    attempt = dict(attempt) if attempt else None
 
     
 
@@ -1531,17 +1669,17 @@ def proctoring_results(attempt_id):
 
     cur.execute(
 
-        "SELECT event_type, timestamp, screenshot_path FROM proctoring_logs WHERE attempt_id = %s ORDER BY timestamp ASC",
+        "SELECT event_type, timestamp, screenshot_path FROM proctoring_logs WHERE attempt_id = ? ORDER BY timestamp ASC",
 
         [attempt_id]
 
     )
 
-    logs = cur.fetchall()
+    logs = [dict(row) for row in cur.fetchall()]
 
     
 
-    cur.close()
+    conn.close()
 
     
 
@@ -1564,6 +1702,135 @@ def uploaded_file(filename):
     return send_from_directory(os.path.join(app.root_path, 'uploads'), filename)
 
 
+
+@app.route('/evaluate_assignment/<int:assignment_id>')
+@require_login('teacher')
+def evaluate_assignment(assignment_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    cur.execute("SELECT * FROM assignments WHERE id=? AND created_by=?", (assignment_id, session['id']))
+    assignment = cur.fetchone()
+    if not assignment:
+        return "Assignment not found", 404
+    
+    assignment = dict(assignment)
+    
+    # Get all students who submitted the assignment
+    cur.execute(
+        """
+        SELECT s.student_id, u.username, s.status, s.total_score, s.submitted_at, s.submission_file_path
+        FROM assignment_submissions s
+        JOIN users u ON u.id=s.student_id
+        WHERE s.assignment_id=?
+        ORDER BY s.submitted_at DESC
+        """,
+        [assignment_id]
+    )
+    students = [dict(row) for row in cur.fetchall()]
+    
+    conn.close()
+    return render_template('evaluate_assignment.html', assignment=assignment, students=students)
+
+@app.route('/download_assignment_results/<int:assignment_id>')
+@require_login('teacher')
+def download_assignment_results(assignment_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT u.username, s.total_score, s.status, s.submitted_at
+        FROM assignment_submissions s
+        JOIN users u ON u.id=s.student_id
+        WHERE s.assignment_id=?
+        ORDER BY s.submitted_at DESC
+        """,
+        [assignment_id]
+    )
+    rows = [dict(row) for row in cur.fetchall()]
+    conn.close()
+
+    si = StringIO()
+    writer = csv.writer(si)
+    writer.writerow(['Username', 'Total Score', 'Status', 'Submitted At'])
+    for r in rows:
+        writer.writerow([r['username'], r['total_score'], r['status'], r['submitted_at']])
+
+    output = si.getvalue()
+    return Response(
+        output,
+        mimetype='text/csv',
+        headers={'Content-Disposition': f'attachment; filename=assignment_{assignment_id}_results.csv'}
+    )
+
+@app.route('/grade_assignment_submission', methods=['POST'])
+@require_login('teacher')
+def grade_assignment_submission():
+    try:
+        data = request.get_json()
+        assignment_id = data['assignment_id']
+        student_id = data['student_id']
+        status = data['status']
+        
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # Update submission status
+        cur.execute(
+            "UPDATE assignment_submissions SET status=? WHERE assignment_id=? AND student_id=?",
+            (status, assignment_id, student_id)
+        )
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/view_submission_file/<int:assignment_id>/<int:student_id>')
+@require_login('teacher')
+def view_submission_file(assignment_id, student_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    cur.execute(
+        "SELECT submission_file_path FROM assignment_submissions WHERE assignment_id=? AND student_id=?",
+        (assignment_id, student_id)
+    )
+    result = cur.fetchone()
+    conn.close()
+    
+    if not result or not result['submission_file_path']:
+        return "File not found", 404
+    
+    file_path = result['submission_file_path']
+    return send_from_directory(os.path.dirname(file_path), os.path.basename(file_path))
+
+@app.route('/add_assignment_feedback', methods=['POST'])
+@require_login('teacher')
+def add_assignment_feedback():
+    try:
+        data = request.get_json()
+        assignment_id = data['assignment_id']
+        student_id = data['student_id']
+        feedback = data['feedback']
+        
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        cur.execute(
+            "UPDATE assignment_submissions SET feedback=? WHERE assignment_id=? AND student_id=?",
+            (feedback, assignment_id, student_id)
+        )
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

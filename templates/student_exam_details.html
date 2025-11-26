@@ -1,0 +1,121 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="dashboard-header">
+    <h1>{{ exam_info.title }} - Detailed Results</h1>
+    <a href="{{ url_for('student_performance') }}" class="btn btn-secondary">← Back to Performance</a>
+</div>
+
+<div class="card">
+    <h3>📋 Exam Summary</h3>
+    <p><strong>Duration:</strong> {{ exam_info.duration }} minutes</p>
+    <p><strong>Total Questions:</strong> {{ questions|length }}</p>
+    <p><strong>Correct Answers:</strong> {{ questions|selectattr('is_correct')|list|length }}</p>
+    <p><strong>Total Score:</strong> {{ exam_info.total_score or 0 }} points</p>
+</div>
+
+<div class="card">
+    <h3>📝 Question-by-Question Review</h3>
+    <div class="questions-review">
+        {% for q in questions %}
+        <div class="question-item {% if q.is_correct %}correct{% elif q.is_correct == false %}incorrect{% else %}unanswered{% endif %}">
+            <div class="question-header">
+                <span class="question-number">Q{{ loop.index }}</span>
+                <span class="question-type">{{ q.question_type }}</span>
+                <span class="question-score">{{ q.score or 0 }} pts</span>
+            </div>
+            
+            <div class="question-content">
+                <p><strong>Question:</strong> {{ q.question_text }}</p>
+                
+                {% if q.question_type == 'MCQ' %}
+                    <p><strong>Your Answer:</strong> 
+                        <span class="{% if q.is_correct %}text-success{% else %}text-danger{% endif %}">
+                            {{ q.selected_option or 'Not answered' }}
+                        </span>
+                    </p>
+                    <p><strong>Correct Answer:</strong> <span class="text-success">{{ q.correct_answer }}</span></p>
+                {% else %}
+                    <p><strong>Your Answer:</strong></p>
+                    <div class="answer-text">{{ q.answer_text or 'Not answered' }}</div>
+                {% endif %}
+                
+                {% if q.feedback %}
+                <div class="feedback-section">
+                    <strong>Teacher Feedback:</strong>
+                    <p class="feedback-text">{{ q.feedback }}</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<style>
+.questions-review {
+    max-height: 600px;
+    overflow-y: auto;
+}
+.question-item {
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    overflow: hidden;
+}
+.question-item.correct {
+    border-left: 4px solid #28a745;
+}
+.question-item.incorrect {
+    border-left: 4px solid #dc3545;
+}
+.question-item.unanswered {
+    border-left: 4px solid #ffc107;
+}
+.question-header {
+    background: #f8f9fa;
+    padding: 10px 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #ddd;
+}
+.question-number {
+    font-weight: bold;
+    color: #007bff;
+}
+.question-type {
+    background: #e9ecef;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.8em;
+}
+.question-score {
+    font-weight: bold;
+    color: #28a745;
+}
+.question-content {
+    padding: 15px;
+}
+.answer-text {
+    background: #f8f9fa;
+    padding: 10px;
+    border-radius: 4px;
+    border-left: 3px solid #007bff;
+    margin: 10px 0;
+}
+.feedback-section {
+    background: #fff3cd;
+    padding: 10px;
+    border-radius: 4px;
+    border-left: 3px solid #ffc107;
+    margin-top: 15px;
+}
+.feedback-text {
+    margin: 5px 0 0 0;
+    font-style: italic;
+}
+.text-success { color: #28a745; }
+.text-danger { color: #dc3545; }
+</style>
+{% endblock %}

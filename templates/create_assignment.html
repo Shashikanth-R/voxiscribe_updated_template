@@ -1,0 +1,234 @@
+{% extends 'layout.html' %}
+{% block title %}Create Assignment - Voxiscribe{% endblock %}
+{% block content %}
+<h2>Create New Assignment</h2>
+
+<div class="card">
+    <form id="assignmentForm">
+        <div class="form-group">
+            <label>Assignment Title:</label>
+            <input type="text" id="title" name="title">
+        </div>
+        
+        <div class="form-group">
+            <label>Description:</label>
+            <textarea id="description" rows="3"></textarea>
+        </div>
+        
+        <div class="form-group">
+            <label>Due Date:</label>
+            <input type="datetime-local" id="due_date">
+        </div>
+        
+        <div class="form-group">
+            <label>Assignment Type:</label>
+            <select id="assignment_type" onchange="toggleAssignmentType()">
+                <option value="questions">Question-based Assignment</option>
+                <option value="file_upload">Upload Question Paper</option>
+            </select>
+        </div>
+        
+        <!-- Question Paper Upload -->
+        <div id="file_upload_section" style="display:none;">
+            <div class="form-group">
+                <label>Upload Question Paper:</label>
+                <input type="file" id="question_paper" name="question_paper" accept="image/*,.pdf">
+            </div>
+        </div>
+        
+        <!-- Questions Section -->
+        <div id="questions_section">
+            <h3>Questions</h3>
+            <div id="questions_container"></div>
+            <button type="button" onclick="addQuestion()" class="btn btn-secondary">Add Question</button>
+        </div>
+        
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Save Assignment</button>
+            <a href="{{ url_for('teacher_dashboard') }}" class="btn btn-secondary">Cancel</a>
+        </div>
+    </form>
+</div>
+
+<script>
+let questionCount = 0;
+
+function toggleAssignmentType() {
+    const type = document.getElementById('assignment_type').value;
+    document.getElementById('file_upload_section').style.display = type === 'file_upload' ? 'block' : 'none';
+    document.getElementById('questions_section').style.display = type === 'questions' ? 'block' : 'none';
+}
+
+function addQuestion() {
+    questionCount++;
+    const container = document.getElementById('questions_container');
+    const questionDiv = document.createElement('div');
+    questionDiv.className = 'question-item';
+    questionDiv.innerHTML = `
+        <div class="question-header">
+            <h4>Question ${questionCount}</h4>
+            <button type="button" onclick="removeQuestion(this)" class="btn btn-danger btn-sm">Remove</button>
+        </div>
+        <div class="form-group">
+            <label>Question Text:</label>
+            <textarea class="question-text"></textarea>
+        </div>
+        <div class="form-group">
+            <label>Type:</label>
+            <select class="question-type" onchange="toggleQuestionOptions(this)">
+                <option value="descriptive">Descriptive</option>
+                <option value="mcq">Multiple Choice</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Marks:</label>
+            <input type="number" class="question-marks" value="1" min="1">
+        </div>
+        <div class="mcq-options" style="display:none;">
+            <label>Options:</label>
+            <input type="text" placeholder="Option A" class="option-input">
+            <input type="text" placeholder="Option B" class="option-input">
+            <input type="text" placeholder="Option C" class="option-input">
+            <input type="text" placeholder="Option D" class="option-input">
+            <label>Correct Answer:</label>
+            <select class="correct-answer">
+                <option value="A">A</option>
+                <option value="B">B</option>
+                <option value="C">C</option>
+                <option value="D">D</option>
+            </select>
+        </div>
+    `;
+    container.appendChild(questionDiv);
+}
+
+function removeQuestion(button) {
+    button.closest('.question-item').remove();
+}
+
+function toggleQuestionOptions(select) {
+    const mcqOptions = select.closest('.question-item').querySelector('.mcq-options');
+    mcqOptions.style.display = select.value === 'mcq' ? 'block' : 'none';
+}
+
+document.getElementById('assignmentForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    console.log('Form submitted');
+    
+    const title = document.getElementById('title').value.trim();
+    if (!title) {
+        alert('Please enter assignment title');
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('title', title);
+    formData.append('description', document.getElementById('description').value);
+    formData.append('due_date', document.getElementById('due_date').value);
+    formData.append('assignment_type', document.getElementById('assignment_type').value);
+    
+    const assignmentType = document.getElementById('assignment_type').value;
+    console.log('Assignment type:', assignmentType);
+    
+    if (assignmentType === 'file_upload') {
+        const file = document.getElementById('question_paper').files[0];
+        if (file) formData.append('question_paper', file);
+    } else {
+        // Collect questions
+        const questions = [];
+        const questionItems = document.querySelectorAll('.question-item');
+        console.log('Found questions:', questionItems.length);
+        
+        questionItems.forEach(item => {
+            const questionText = item.querySelector('.question-text').value.trim();
+            if (questionText) {
+                const question = {
+                    text: questionText,
+                    type: item.querySelector('.question-type').value,
+                    marks: parseInt(item.querySelector('.question-marks').value) || 1
+                };
+                
+                if (question.type === 'mcq') {
+                    const options = {};
+                    const optionInputs = item.querySelectorAll('.option-input');
+                    optionInputs.forEach((input, index) => {
+                        if (input.value.trim()) {
+                            options[String.fromCharCode(65 + index)] = input.value.trim();
+                        }
+                    });
+                    question.options = options;
+                    question.correct_answer = item.querySelector('.correct-answer').value;
+                }
+                
+                questions.push(question);
+            }
+        });
+        
+        if (questions.length === 0) {
+            alert('Please add at least one question');
+            return;
+        }
+        
+        formData.append('questions_json', JSON.stringify(questions));
+    }
+    
+    try {
+        console.log('Sending request...');
+        const response = await fetch('/save_assignment', {
+            method: 'POST',
+            body: formData
+        });
+        
+        console.log('Response status:', response.status);
+        
+        if (response.ok) {
+            const result = await response.json();
+            console.log('Result:', result);
+            if (result.success) {
+                alert('Assignment saved successfully!');
+                window.location.replace('/teacher/dashboard');
+            } else {
+                alert('Error: ' + result.message);
+            }
+        } else {
+            const errorText = await response.text();
+            console.error('Server error:', errorText);
+            alert('Server error: ' + response.status);
+        }
+    } catch (error) {
+        console.error('Network error:', error);
+        alert('Network error: ' + error.message);
+    }
+});
+
+// Add first question by default
+addQuestion();
+</script>
+
+<style>
+.question-item {
+    border: 1px solid #ddd;
+    padding: 15px;
+    margin-bottom: 15px;
+    border-radius: 5px;
+}
+.question-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+.mcq-options {
+    background: #f8f9fa;
+    padding: 10px;
+    border-radius: 5px;
+    margin-top: 10px;
+}
+.option-input {
+    display: block;
+    width: 100%;
+    margin-bottom: 5px;
+    padding: 5px;
+}
+</style>
+{% endblock %}

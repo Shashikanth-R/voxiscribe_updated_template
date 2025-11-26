@@ -5,6 +5,7 @@
   <h2>Exam Management</h2>
   <div>
     <a href="{{ url_for('create_exam') }}" class="btn btn-primary">Create Exam</a>
+    <a href="{{ url_for('create_assignment') }}" class="btn btn-success">Create Assignment</a>
     <a href="{{ url_for('logout') }}" class="btn btn-danger">Logout</a>
   </div>
 </div>
@@ -41,6 +42,43 @@
       {% else %}
       <tr><td colspan="4">No exams yet.</td></tr>
       {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h3>Your Assignments</h3>
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Title</th>
+        <th>Due Date</th>
+        <th>Status</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="assignments-tbody">
+      {% if assignments %}
+        {% for a in assignments %}
+        <tr data-assignment-id="{{ a.id }}">
+          <td>{{ a.title }}</td>
+          <td>{{ a.due_date or 'No due date' }}</td>
+          <td class="status">{% if a.published %}Published{% else %}Draft{% endif %}</td>
+          <td class="actions">
+            {% if not a.published %}
+            <button class="btn btn-secondary action-publish-assignment">Publish</button>
+            {% else %}
+            <button class="btn btn-secondary" disabled>Published ✅</button>
+            {% endif %}
+            <button class="btn btn-danger action-delete-assignment">Delete</button>
+            <a class="btn btn-info" href="/evaluate_assignment/{{ a.id }}">Evaluate</a>
+            <a class="btn btn-info" href="/download_assignment_results/{{ a.id }}">Download CSV</a>
+          </td>
+        </tr>
+        {% endfor %}
+      {% else %}
+        <tr><td colspan="4">No assignments yet.</td></tr>
+      {% endif %}
     </tbody>
   </table>
 </div>
@@ -92,6 +130,40 @@
       openAttemptsModal(examId);
     }
   });
+
+  // Assignment actions
+  const assignmentsTbody = document.getElementById('assignments-tbody');
+  if (assignmentsTbody) {
+    assignmentsTbody.addEventListener('click', async function(e){
+      const tr = e.target.closest('tr');
+      if (!tr) return;
+      const assignmentId = tr.getAttribute('data-assignment-id');
+
+      if (e.target.classList.contains('action-publish-assignment')) {
+        const res = await fetch(`/publish_assignment/${assignmentId}`, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          tr.querySelector('.status').textContent = 'Published';
+          e.target.outerHTML = '<button class="btn btn-secondary" disabled>Published ✅</button>';
+          showToast('Assignment published');
+        } else {
+          showToast('Failed to publish', true);
+        }
+      }
+
+      if (e.target.classList.contains('action-delete-assignment')) {
+        if (!confirm('Are you sure you want to delete this assignment?')) return;
+        const res = await fetch(`/delete_assignment/${assignmentId}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+          tr.remove();
+          showToast('Assignment deleted');
+        } else {
+          showToast('Delete failed: ' + (data.message||'error'), true);
+        }
+      }
+    });
+  }
 
   function openAttemptsModal(examId){
     const modal = document.getElementById('attempts-modal');

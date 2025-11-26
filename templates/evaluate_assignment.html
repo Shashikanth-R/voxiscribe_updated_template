@@ -1,0 +1,196 @@
+{% extends 'layout.html' %}
+{% block title %}Evaluate Assignment - {{ assignment.title }}{% endblock %}
+{% block content %}
+<h2>Evaluate Assignment: {{ assignment.title }}</h2>
+
+<div class="card">
+  <h3>Assignment Submissions</h3>
+  {% if students %}
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Student</th>
+          <th>Status</th>
+          <th>Score</th>
+          <th>Submitted At</th>
+          <th>Submission File</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for student in students %}
+        <tr data-student-id="{{ student.student_id }}">
+          <td>{{ student.username }}</td>
+          <td class="status-cell">{{ student.status }}</td>
+          <td>{{ student.total_score or 'Not graded' }}</td>
+          <td>{{ student.submitted_at }}</td>
+          <td>
+            {% if student.submission_file_path %}
+              <a href="/view_submission_file/{{ assignment.id }}/{{ student.student_id }}" target="_blank" class="btn btn-sm btn-info">View File</a>
+            {% else %}
+              No file
+            {% endif %}
+          </td>
+          <td>
+            {% if student.status == 'submitted' %}
+              <button class="btn btn-success btn-sm accept-btn" data-assignment-id="{{ assignment.id }}" data-student-id="{{ student.student_id }}">Accept</button>
+              <button class="btn btn-danger btn-sm reject-btn" data-assignment-id="{{ assignment.id }}" data-student-id="{{ student.student_id }}">Reject</button>
+              <button class="btn btn-info btn-sm feedback-btn" data-assignment-id="{{ assignment.id }}" data-student-id="{{ student.student_id }}">Add Feedback</button>
+            {% else %}
+              <span class="badge badge-{{ 'success' if student.status == 'accepted' else 'danger' }}">{{ student.status.title() }}</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>No submissions yet for this assignment.</p>
+  {% endif %}
+</div>
+
+<div class="form-actions">
+  <a href="{{ url_for('teacher_dashboard') }}" class="btn btn-secondary">Back to Dashboard</a>
+</div>
+
+<!-- Feedback Modal -->
+<div id="feedbackModal" class="modal" style="display:none;">
+  <div class="modal-content">
+    <span class="close">&times;</span>
+    <h3>Add Feedback</h3>
+    <form id="feedbackForm">
+      <textarea id="feedbackText" placeholder="Enter your feedback here..." rows="5" style="width:100%; margin-bottom:10px;"></textarea>
+      <div>
+        <button type="submit" class="btn btn-primary">Save Feedback</button>
+        <button type="button" class="btn btn-secondary" onclick="closeFeedbackModal()">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+let currentAssignmentId, currentStudentId;
+
+document.addEventListener('DOMContentLoaded', function() {
+  document.querySelectorAll('.accept-btn, .reject-btn, .feedback-btn').forEach(button => {
+    button.addEventListener('click', async function() {
+      const assignmentId = this.dataset.assignmentId;
+      const studentId = this.dataset.studentId;
+      
+      if (this.classList.contains('feedback-btn')) {
+        currentAssignmentId = assignmentId;
+        currentStudentId = studentId;
+        document.getElementById('feedbackModal').style.display = 'block';
+        return;
+      }
+      
+      const action = this.classList.contains('accept-btn') ? 'accepted' : 'rejected';
+      
+      try {
+        const response = await fetch('/grade_assignment_submission', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            assignment_id: assignmentId,
+            student_id: studentId,
+            status: action
+          })
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+          const row = this.closest('tr');
+          row.querySelector('.status-cell').textContent = action;
+          row.querySelector('td:last-child').innerHTML = `<span class="badge badge-${action === 'accepted' ? 'success' : 'danger'}">${action.charAt(0).toUpperCase() + action.slice(1)}</span>`;
+          alert(`Assignment ${action} successfully!`);
+        } else {
+          alert('Error: ' + result.message);
+        }
+      } catch (error) {
+        alert('Error updating status');
+      }
+    });
+  });
+  
+  // Feedback form submission
+  document.getElementById('feedbackForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const feedback = document.getElementById('feedbackText').value;
+    
+    try {
+      const response = await fetch('/add_assignment_feedback', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          assignment_id: currentAssignmentId,
+          student_id: currentStudentId,
+          feedback: feedback
+        })
+      });
+      
+      const result = await response.json();
+      if (result.success) {
+        alert('Feedback added successfully!');
+        closeFeedbackModal();
+      } else {
+        alert('Error: ' + result.message);
+      }
+    } catch (error) {
+      alert('Error adding feedback');
+    }
+  });
+  
+  // Close modal when clicking X
+  document.querySelector('.close').addEventListener('click', closeFeedbackModal);
+});
+
+function closeFeedbackModal() {
+  document.getElementById('feedbackModal').style.display = 'none';
+  document.getElementById('feedbackText').value = '';
+}
+</script>
+
+<style>
+.badge {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.8em;
+}
+.badge-success {
+  background: #28a745;
+  color: white;
+}
+.badge-danger {
+  background: #dc3545;
+  color: white;
+}
+.modal {
+  position: fixed;
+  z-index: 1000;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0,0,0,0.5);
+}
+.modal-content {
+  background-color: white;
+  margin: 15% auto;
+  padding: 20px;
+  border-radius: 5px;
+  width: 50%;
+  position: relative;
+}
+.close {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  font-size: 24px;
+  cursor: pointer;
+}
+</style>
+{% endblock %}

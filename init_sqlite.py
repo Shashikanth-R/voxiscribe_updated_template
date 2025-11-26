@@ -65,6 +65,7 @@ def create_database():
             selected_option TEXT,
             is_correct BOOLEAN,
             score DECIMAL(5,2),
+            feedback TEXT,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             UNIQUE (student_id, exam_id, question_id),
             FOREIGN KEY (student_id) REFERENCES users(id),

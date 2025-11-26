@@ -1,0 +1,177 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="dashboard-header">
+    <h1>Performance Analytics - {{ session.username }}</h1>
+    <a href="{{ url_for('logout') }}" class="btn btn-danger">Logout</a>
+</div>
+
+<div class="dashboard-nav">
+    <a href="{{ url_for('student_dashboard') }}" class="nav-btn">Dashboard</a>
+    <a href="{{ url_for('student_performance') }}" class="nav-btn active">Performance Analytics</a>
+</div>
+
+<div class="analytics-grid">
+    <div class="card analytics-card">
+        <h3>📊 Overall Statistics</h3>
+        <div class="stats-grid">
+            <div class="stat-item">
+                <span class="stat-number">{{ analytics.total_exams }}</span>
+                <span class="stat-label">Total Exams</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-number">{{ analytics.avg_score }}</span>
+                <span class="stat-label">Average Score</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-number">{{ analytics.best_score }}</span>
+                <span class="stat-label">Best Score</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="card analytics-card">
+        <h3>📈 Recent Performance Trend</h3>
+        <canvas id="performanceChart" width="400" height="200"></canvas>
+    </div>
+</div>
+
+<div class="card">
+    <h3>📚 Exam History</h3>
+    <div class="exam-history">
+        {% if exam_history %}
+            {% for exam in exam_history %}
+            <div class="history-item">
+                <div class="exam-info">
+                    <h4>{{ exam.title }}</h4>
+                    <p>Duration: {{ exam.duration }} minutes | Questions: {{ exam.total_questions }}</p>
+                    <p class="exam-date">Completed: {{ exam.submitted_at }}</p>
+                </div>
+                <div class="exam-score">
+                    <span class="score">{{ exam.total_score or 0 }}/{{ exam.total_questions }}</span>
+                    <a href="{{ url_for('student_exam_details', exam_id=exam.id) }}" class="btn btn-sm">View Details</a>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <p>No completed exams yet. Take your first exam to see your performance!</p>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+// Simple chart for performance trend
+const ctx = document.getElementById('performanceChart').getContext('2d');
+const data = {{ analytics.recent_performance | tojson }};
+const canvas = document.getElementById('performanceChart');
+
+// Draw simple line chart
+if (data.length > 0) {
+    const maxScore = Math.max(...data);
+    const width = canvas.width;
+    const height = canvas.height;
+    
+    ctx.strokeStyle = '#007bff';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    
+    data.forEach((score, index) => {
+        const x = (index / (data.length - 1)) * (width - 40) + 20;
+        const y = height - 20 - ((score / maxScore) * (height - 40));
+        
+        if (index === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+        
+        // Draw points
+        ctx.fillStyle = '#007bff';
+        ctx.beginPath();
+        ctx.arc(x, y, 4, 0, 2 * Math.PI);
+        ctx.fill();
+    });
+    
+    ctx.stroke();
+} else {
+    ctx.fillStyle = '#666';
+    ctx.font = '16px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('No data available', canvas.width/2, canvas.height/2);
+}
+</script>
+
+<style>
+.dashboard-nav {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+.nav-btn {
+    padding: 10px 20px;
+    background: #f8f9fa;
+    border: 1px solid #ddd;
+    text-decoration: none;
+    color: #333;
+    border-radius: 5px;
+}
+.nav-btn.active {
+    background: #007bff;
+    color: white;
+}
+.analytics-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 20px;
+}
+.analytics-card {
+    padding: 20px;
+}
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 15px;
+    text-align: center;
+}
+.stat-item {
+    display: flex;
+    flex-direction: column;
+}
+.stat-number {
+    font-size: 2em;
+    font-weight: bold;
+    color: #007bff;
+}
+.stat-label {
+    font-size: 0.9em;
+    color: #666;
+}
+.exam-history {
+    max-height: 400px;
+    overflow-y: auto;
+}
+.history-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px;
+    border-bottom: 1px solid #eee;
+}
+.exam-info h4 {
+    margin: 0 0 5px 0;
+}
+.exam-info p {
+    margin: 2px 0;
+    color: #666;
+    font-size: 0.9em;
+}
+.exam-score {
+    text-align: right;
+}
+.score {
+    font-size: 1.2em;
+    font-weight: bold;
+    color: #28a745;
+    display: block;
+    margin-bottom: 5px;
+}
+</style>
+{% endblock %}
