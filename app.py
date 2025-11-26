@@ -21,21 +21,19 @@ def get_db_connection():
 
 class DatabaseConnection:
     def __init__(self):
-        self.connection = None
+        pass
     
     def cursor(self):
-        if not self.connection:
-            self.connection = get_db_connection()
+        self.connection = get_db_connection()
         return self.connection.cursor()
     
     def commit(self):
-        if self.connection:
+        if hasattr(self, 'connection') and self.connection:
             self.connection.commit()
     
     def close(self):
-        if self.connection:
+        if hasattr(self, 'connection') and self.connection:
             self.connection.close()
-            self.connection = None
 
 mysql = DatabaseConnection()
 
@@ -251,10 +249,11 @@ def login():
         password = request.form['password']
         role = request.form['role']
 
-        cur = mysql.connection.cursor()
-        cur.execute("SELECT id, username, password, role FROM users WHERE username=%s AND role=%s", (username, role))
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT id, username, password, role FROM users WHERE username=? AND role=?", (username, role))
         user = cur.fetchone()
-        cur.close()
+        conn.close()
 
         if user and password == user['password']:
             session['loggedin'] = True
@@ -280,10 +279,11 @@ def register():
         role = request.form['role']
 
         try:
-            cur = mysql.connection.cursor()
-            cur.execute("INSERT INTO users(username, password, role) VALUES(%s, %s, %s)", (username, password, role))
-            mysql.connection.commit()
-            cur.close()
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("INSERT INTO users(username, password, role) VALUES(?, ?, ?)", (username, password, role))
+            conn.commit()
+            conn.close()
         except Exception as e:
             return render_template('register.html', error='Registration failed: {}'.format(str(e)))
 
@@ -350,10 +350,11 @@ def signup():
         if not username or not password or role not in ('student','teacher'):
             return render_template('signup.html', error='Please fill all fields and choose a valid role.')
         try:
-            cur = mysql.connection.cursor()
-            cur.execute("INSERT INTO users(username, password, role) VALUES(%s, %s, %s)", (username, password, role))
-            mysql.connection.commit()
-            cur.close()
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("INSERT INTO users(username, password, role) VALUES(?, ?, ?)", (username, password, role))
+            conn.commit()
+            conn.close()
             return redirect(url_for('login'))
         except Exception as e:
             return render_template('signup.html', error='Registration failed: {}'.format(str(e)))

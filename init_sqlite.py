@@ -119,11 +119,11 @@ def create_database():
         conn.commit()
         conn.close()
         
-        print("✅ SQLite database created successfully!")
-        print("✅ Default admin user created (username: admin, password: admin123)")
+        print("SQLite database created successfully!")
+        print("Default admin user created (username: admin, password: admin123)")
         
     except Exception as e:
-        print(f"❌ Database initialization failed: {e}")
+        print(f"Database initialization failed: {e}")
 
 if __name__ == "__main__":
     create_database()
