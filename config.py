@@ -3,7 +3,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Database configuration - using SQLite for simplicity
+# Database configuration
+DATABASE_URL = os.getenv('DATABASE_URL')
 DB_PATH = os.getenv('DATABASE_PATH', 'voxiscribe.db')
 
 # App configuration

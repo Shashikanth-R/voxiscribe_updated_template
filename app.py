@@ -15,9 +15,23 @@ app.secret_key = config.SECRET_KEY
 
 # Database connection
 def get_db_connection():
-    conn = sqlite3.connect(config.DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    if config.DATABASE_URL:
+        # Production PostgreSQL
+        import psycopg2
+        import psycopg2.extras
+        conn = psycopg2.connect(config.DATABASE_URL)
+        return conn
+    else:
+        # Local SQLite
+        conn = sqlite3.connect(config.DB_PATH)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+def get_cursor(conn):
+    if config.DATABASE_URL:
+        return conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    else:
+        return conn.cursor()
 
 class DatabaseConnection:
     def __init__(self):
@@ -97,11 +111,17 @@ def require_login(role=None):
 
 def fetch_exam(exam_id, ensure_published=False):
     conn = get_db_connection()
-    cur = conn.cursor()
+    cur = get_cursor(conn)
     if ensure_published:
-        cur.execute("SELECT id, title, duration, created_by, published FROM exams WHERE id=? AND published=1", [exam_id])
+        if config.DATABASE_URL:
+            cur.execute("SELECT id, title, duration, created_by, published FROM exams WHERE id=%s AND published=true", [exam_id])
+        else:
+            cur.execute("SELECT id, title, duration, created_by, published FROM exams WHERE id=? AND published=1", [exam_id])
     else:
-        cur.execute("SELECT id, title, duration, created_by, published FROM exams WHERE id=?", [exam_id])
+        if config.DATABASE_URL:
+            cur.execute("SELECT id, title, duration, created_by, published FROM exams WHERE id=%s", [exam_id])
+        else:
+            cur.execute("SELECT id, title, duration, created_by, published FROM exams WHERE id=?", [exam_id])
     exam = cur.fetchone()
     conn.close()
     return exam
@@ -201,8 +221,11 @@ def login():
         role = request.form['role']
 
         conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT id, username, password, role FROM users WHERE username=? AND role=?", (username, role))
+        cur = get_cursor(conn)
+        if config.DATABASE_URL:
+            cur.execute("SELECT id, username, password, role FROM users WHERE username=%s AND role=%s", (username, role))
+        else:
+            cur.execute("SELECT id, username, password, role FROM users WHERE username=? AND role=?", (username, role))
         user = cur.fetchone()
         conn.close()
 
