@@ -7,8 +7,7 @@ import os
 import tempfile
 import config
 from speech_server import transcribe_audio
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import sqlite3
 import random
 
 app = Flask(__name__)
@@ -16,17 +15,9 @@ app.secret_key = config.SECRET_KEY
 
 # Database connection
 def get_db_connection():
-    if hasattr(config, 'DATABASE_URL') and config.DATABASE_URL:
-        return psycopg2.connect(config.DATABASE_URL, cursor_factory=RealDictCursor)
-    else:
-        return psycopg2.connect(
-            host=config.DB_HOST,
-            user=config.DB_USER,
-            password=config.DB_PASSWORD,
-            database=config.DB_NAME,
-            port=config.DB_PORT,
-            cursor_factory=RealDictCursor
-        )
+    conn = sqlite3.connect(config.DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 class DatabaseConnection:
     def __init__(self):

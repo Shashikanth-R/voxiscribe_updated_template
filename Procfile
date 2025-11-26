@@ -1,1 +1,1 @@
-web: gunicorn app:app
+web: python init_sqlite.py && gunicorn app:app
