@@ -1,5 +1,0 @@
-/* Basic styles for Voxiscribe */
-:root { color-scheme: light dark; }
-body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; }
-header { padding: 1rem; border-bottom: 1px solid #ddd; }
-main { padding: 1rem; }
